@@ -1,0 +1,70 @@
+server:
+  port: 8080
+  forward-headers-strategy: framework
+
+spring:
+  application:
+    name: office-platform
+  jackson:
+    time-zone: America/Bogota
+  datasource:
+    url: jdbc:postgresql://postgres:5432/${POSTGRES_DB:office_platform}
+    username: ${POSTGRES_USER:office_platform}
+    password: ${POSTGRES_PASSWORD:office_platform}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    open-in-view: false
+    show-sql: false
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+  servlet:
+    multipart:
+      enabled: true
+      max-file-size: ${office-platform.storage.max-file-size:20MB}
+      max-request-size: ${office-platform.storage.max-file-size:20MB}
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+office-platform:
+  storage:
+    max-file-size: 20MB
+    max-total-size: ${OFFICE_PLATFORM_MAX_TOTAL_SIZE:53687091200}
+    allowed-mime-types: application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation
+    minio:
+      endpoint: http://minio:9000
+      access-key: ${MINIO_ACCESS_KEY:minioadmin}
+      secret-key: ${MINIO_SECRET_KEY:minioadmin}
+      bucket: office-platform
+  app-internal-url: ${APP_INTERNAL_URL:http://localhost:8080}
+  onlyoffice:
+    document-server-url: http://onlyoffice
+    document-server-public-url: ${ONLYOFFICE_PUBLIC_URL:http://localhost:8081}
+    callback-url: ${OFFICE_PLATFORM_PUBLIC_URL:http://localhost:8080}/api/onlyoffice/callback
+    max-connections: ${ONLYOFFICE_MAX_CONNECTIONS:20}
+    jwt:
+      secret: ${ONLYOFFICE_JWT_SECRET:changeme-onlyoffice-secret-key32}
+  cors:
+    allowed-origins: ${OFFICE_PLATFORM_CORS_ALLOWED_ORIGINS:*}
+  backup:
+    directory: ${OFFICE_PLATFORM_BACKUP_PATH:backups}
+    auto-enabled: ${OFFICE_PLATFORM_BACKUP_AUTO_ENABLED:true}
+    interval-hours: ${OFFICE_PLATFORM_BACKUP_INTERVAL_HOURS:24}
+    max-retained: ${OFFICE_PLATFORM_BACKUP_MAX_RETAINED:10}
+  widget-token:
+    # Secreto para firmar los Widget Tokens (JWT de identidad por cédula).
+    # Cambiar en producción via variable de entorno WIDGET_TOKEN_SECRET.
+    # Debe tener al menos 32 caracteres para HS256.
+    secret: ${WIDGET_TOKEN_SECRET:changeme-widget-token-secret-key32}
+
+
+logging:
+  level:
+    root: INFO
+    com.officeplatform: DEBUG
