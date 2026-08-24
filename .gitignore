@@ -1,0 +1,84 @@
+### Secrets / local environment ###
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+*.crt
+
+### Runtime data (never commit real content) ###
+# Anchored to the repository root on purpose: an unanchored `storage/`
+# would also exclude source packages such as `service/storage/`.
+/backups/
+/uploads/
+/storage/
+/minio_data/
+/postgres_data/
+
+### Maven / build ###
+target/
+!.mvn/wrapper/maven-wrapper.properties
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+/build/
+*.jar
+!mvnw.jar
+*.war
+*.ear
+dependency-reduced-pom.xml
+
+### Logs / temp ###
+*.log
+/logs/
+*.tmp
+*.bak
+*.swp
+*~
+hs_err_pid*
+replay_pid*
+
+### Eclipse / STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+/out/
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+### VS Code ###
+.vscode/
+
+### OS ###
+.DS_Store
+Thumbs.db
+desktop.ini
+
+### AI / internal working notes (not part of the deliverable) ###
+.claude/
+.atl/
+AGENTS.md
+CLAUDE.md
+PROMPT-ARQUITECTURA.md
+
+### Local sample artifacts / generator boilerplate ###
+test.docx
+HELP.md
