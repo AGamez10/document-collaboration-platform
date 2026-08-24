@@ -1,0 +1,68 @@
+package com.officeplatform.service.admin;
+
+import java.io.InputStream;
+import java.time.LocalDate;
+import java.util.List;
+
+import org.springframework.data.domain.Pageable;
+
+import com.officeplatform.dto.request.BackupConfigRequest;
+import com.officeplatform.dto.request.CreateApiKeyRequest;
+import com.officeplatform.dto.response.ActivityLogResponse;
+import com.officeplatform.dto.response.AdminFileResponse;
+import com.officeplatform.dto.response.ApiKeyCreatedResponse;
+import com.officeplatform.dto.response.ApiKeyResponse;
+import com.officeplatform.dto.response.BackupConfigResponse;
+import com.officeplatform.dto.response.BackupInfoResponse;
+import com.officeplatform.dto.response.DashboardResponse;
+import com.officeplatform.dto.response.EditorSessionResponse;
+import com.officeplatform.dto.response.KnownUserResponse;
+import com.officeplatform.dto.response.OnlyOfficeStatusResponse;
+import com.officeplatform.dto.response.PagedResponse;
+
+public interface AdminService {
+
+    DashboardResponse getDashboard();
+
+    List<ApiKeyResponse> listApiKeys();
+
+    ApiKeyCreatedResponse createApiKey(CreateApiKeyRequest request);
+
+    ApiKeyResponse updateApiKeyStatus(Long id, boolean active);
+
+    void deleteApiKey(Long id);
+
+    PagedResponse<ActivityLogResponse> getActivityLog(
+            Pageable pageable, LocalDate dateFrom, LocalDate dateTo, Long apiKeyId, String action, String userId,
+            Long folderId);
+
+    List<AdminFileResponse> listFiles(Long apiKeyId, boolean trashed);
+
+    void restoreFile(Long fileId);
+
+    void purgeFile(Long fileId);
+
+    OnlyOfficeStatusResponse getOnlyOfficeStatus();
+
+    List<EditorSessionResponse> getEditorSessions(Boolean active, Long apiKeyId);
+
+    void forceCloseSession(Long sessionId);
+
+    List<KnownUserResponse> listUsers(Long apiKeyId, String search);
+
+    /** Platform-admin operation: designate a known user's role ("user" | "admin") in its project. */
+    KnownUserResponse updateUserRole(Long knownUserId, String role);
+
+    List<BackupInfoResponse> listBackups();
+
+    BackupInfoResponse createBackup(String type);
+
+    InputStream getBackupStream(String fileName);
+
+    void deleteBackup(String fileName);
+
+    BackupConfigResponse getBackupConfig();
+
+    BackupConfigResponse updateBackupConfig(BackupConfigRequest request);
+
+}
