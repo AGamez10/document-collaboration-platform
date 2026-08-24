@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="es" data-op-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Office Platform — Panel de Administración Profesional</title>
+  <meta name="description" content="Panel de administración de Office Platform: gestión de archivos, backups físicos, trazabilidad, usuarios y API keys." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="admin.css?v=2.6" />
+</head>
+<body>
+  <div id="op-admin-root" class="op-admin">
+
+    <!-- ── Login Screen ────────────────────────────────────────────────── -->
+    <section id="op-login" class="op-login">
+      <div class="op-login__bg" aria-hidden="true"></div>
+      <form id="op-login-form" class="op-login__card" autocomplete="on">
+        <div class="op-login__brand">
+          <div class="op-login__logo-wrap" aria-hidden="true">
+            <svg width="40" height="40" viewBox="0 0 36 36" fill="none">
+              <rect width="36" height="36" rx="10" fill="url(#lg-login)"/>
+              <path d="M9 12h18M9 18h12M9 24h14" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+              <defs><linearGradient id="lg-login" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse"><stop stop-color="#4f46e5"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs>
+            </svg>
+          </div>
+          <h1>Office Platform</h1>
+          <p>Consola de Gestión y Administración</p>
+        </div>
+        <label class="op-field">
+          <span>Usuario Administrador</span>
+          <input type="text" id="op-login-username" name="username" autocomplete="username" required placeholder="admin" />
+        </label>
+        <label class="op-field">
+          <span>Contraseña</span>
+          <input type="password" id="op-login-password" name="password" autocomplete="current-password" required placeholder="••••••••" />
+        </label>
+        <p id="op-login-error" class="op-login__error" hidden></p>
+        <button type="submit" id="op-login-submit" class="op-btn op-btn--primary op-login__submit">
+          <span>Iniciar Sesión</span>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </form>
+    </section>
+
+    <!-- ── App Shell ──────────────────────────────────────────────────── -->
+    <div id="op-app" class="op-app" hidden>
+      <!-- Sidebar -->
+      <aside class="op-sidebar">
+        <div class="op-brand">
+          <div class="op-brand__icon" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 36 36" fill="none">
+              <rect width="36" height="36" rx="9" fill="url(#lg-brand)"/>
+              <path d="M9 12h18M9 18h12M9 24h14" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+              <defs><linearGradient id="lg-brand" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse"><stop stop-color="#4f46e5"/><stop offset="1" stop-color="#7c3aed"/></linearGradient></defs>
+            </svg>
+          </div>
+          <div class="op-brand__meta">
+            <span class="op-brand__name">Office Platform</span>
+            <span class="op-brand__tag">Admin Console</span>
+          </div>
+        </div>
+
+        <nav class="op-nav" role="navigation" aria-label="Navegación Principal">
+          <div class="op-nav__section-title">PRINCIPAL</div>
+          <button type="button" class="op-nav__item is-active" data-view="dashboard" id="nav-dashboard">
+            <svg class="op-nav__svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+            <span>Dashboard</span>
+          </button>
+          <button type="button" class="op-nav__item" data-view="files" id="nav-files">
+            <svg class="op-nav__svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+            <span>Archivos &amp; Papelera</span>
+          </button>
+          <button type="button" class="op-nav__item" data-view="backups" id="nav-backups">
+            <svg class="op-nav__svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            <span>Copias de Seguridad</span>
+          </button>
+
+          <div class="op-nav__section-title">CONTROL &amp; SEGURIDAD</div>
+          <button type="button" class="op-nav__item" data-view="users" id="nav-users">
+            <svg class="op-nav__svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            <span>Usuarios &amp; Apps</span>
+          </button>
+          <button type="button" class="op-nav__item" data-view="api-keys" id="nav-api-keys">
+            <svg class="op-nav__svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 2-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+            <span>API Keys</span>
+          </button>
+          <button type="button" class="op-nav__item" data-view="activity" id="nav-activity">
+            <svg class="op-nav__svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            <span>Trazabilidad / Auditoría</span>
+          </button>
+        </nav>
+
+        <div class="op-sidebar__footer">
+          <button type="button" id="op-theme-toggle" class="op-theme-toggle" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema claro/oscuro">
+            <svg id="op-icon-theme" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <button type="button" id="op-logout" class="op-btn op-btn--ghost op-btn--sm">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <span>Cerrar Sesión</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- Main Content Area -->
+      <main class="op-main">
+        <header class="op-topbar">
+          <div class="op-topbar__title-area">
+            <h2 id="op-view-title">Dashboard General</h2>
+            <span class="op-topbar__subtitle" id="op-view-subtitle">Monitoreo en tiempo real, métricas de almacenamiento y sesiones activas</span>
+          </div>
+          <div class="op-topbar__user">
+            <div class="op-avatar" id="op-admin-avatar" aria-hidden="true">A</div>
+            <div class="op-topbar__user-info">
+              <span class="op-topbar__user-name" id="op-admin-user">admin</span>
+              <span class="op-topbar__user-role">Super Admin</span>
+            </div>
+          </div>
+        </header>
+
+        <!-- Toast Notifications -->
+        <div id="op-toast" class="op-toast" role="alert" aria-live="polite" hidden></div>
+
+        <!-- ════════ VIEW 1: DASHBOARD ════════ -->
+        <section id="op-view-dashboard" class="op-view">
+          <div class="op-dashboard-grid" id="op-dashboard-cards"></div>
+
+          <div class="op-dashboard-row">
+            <!-- Chart Panel -->
+            <div class="op-panel op-panel--chart">
+              <div class="op-panel__hd">
+                <div>
+                  <h3>Actividad Operativa — Últimos 30 días</h3>
+                  <p class="op-panel__sub">Eventos registrados de edición, descarga, subida y creación</p>
+                </div>
+                <div class="op-legend">
+                  <span class="op-legend__dot" aria-hidden="true"></span>
+                  <span>Operaciones diarias</span>
+                </div>
+              </div>
+              <div class="op-chart-wrap">
+                <canvas id="op-activity-chart" height="110"></canvas>
+              </div>
+            </div>
+
+            <!-- Top Projects Panel -->
+            <div class="op-panel op-panel--quick">
+              <div class="op-panel__hd">
+                <div>
+                  <h3>Top Proyectos Consumidores</h3>
+                  <p class="op-panel__sub">Uso de almacenamiento por API Key</p>
+                </div>
+              </div>
+              <ul class="op-quick-stats" id="op-quick-stats" aria-label="Top proyectos por uso"></ul>
+            </div>
+          </div>
+
+          <div class="op-dashboard-row op-dashboard-row--secondary">
+            <!-- OnlyOffice KPI Card -->
+            <div id="op-oo-status-card"></div>
+
+            <!-- Recent Activity Panel -->
+            <div class="op-panel op-panel--recent">
+              <div class="op-panel__hd">
+                <div>
+                  <h3>Registro Reciente</h3>
+                  <p class="op-panel__sub">Trazabilidad detallada por usuario y aplicación</p>
+                </div>
+              </div>
+              <ul class="op-recent-list" id="op-recent-activity" aria-label="Actividad reciente"></ul>
+              <p id="op-recent-empty" class="op-empty" hidden>Sin actividad reciente.</p>
+            </div>
+          </div>
+
+          <!-- Active Editor Sessions Panel -->
+          <div class="op-panel op-sessions-panel">
+            <div class="op-panel__hd">
+              <div>
+                <div class="op-sessions-header-wrap">
+                  <span class="op-live-indicator"><span class="op-live-indicator__ping"></span></span>
+                  <h3>Sesiones Activas de Edición Colaborativa</h3>
+                </div>
+                <p class="op-panel__sub">Conexiones simultáneas con OnlyOffice Document Server. Desconexión inmediata con 1 click.</p>
+              </div>
+              <span class="op-badge op-badge--live">Auto-refresh 30s</span>
+            </div>
+            <div class="op-table-responsive">
+              <table class="op-table">
+                <thead>
+                  <tr>
+                    <th>Documento</th>
+                    <th>Usuario Activo</th>
+                    <th>Aplicación / Proyecto</th>
+                    <th>Tiempo Abierto</th>
+                    <th style="text-align: right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="op-sessions-tbody"></tbody>
+              </table>
+            </div>
+            <p id="op-sessions-empty" class="op-empty" hidden>No hay usuarios editando documentos en este momento.</p>
+          </div>
+        </section>
+
+        <!-- ════════ VIEW 2: FILES & TRASH ════════ -->
+        <section id="op-view-files" class="op-view" hidden>
+          <div class="op-view__toolbar">
+            <div class="op-segmented" role="group" aria-label="Tipo de archivos">
+              <button type="button" class="op-segmented__btn is-active" data-trashed="false" id="files-btn-active">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <span>Archivos Activos</span>
+              </button>
+              <button type="button" class="op-segmented__btn" data-trashed="true" id="files-btn-trash">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span>Papelera de Reciclaje</span>
+              </button>
+            </div>
+            <p class="op-view__desc" id="op-files-hint">Visualiza todos los archivos de la plataforma. Puedes restaurar elementos eliminados o purgarlos definitivamente.</p>
+          </div>
+
+          <div class="op-panel">
+            <div class="op-table-responsive">
+              <table class="op-table" id="op-files-table">
+                <thead>
+                  <tr>
+                    <th>Nombre de Archivo</th>
+                    <th>Ubicación / Carpeta</th>
+                    <th>Tipo MIME</th>
+                    <th>Tamaño</th>
+                    <th>Aplicación Origen</th>
+                    <th>Última Modificación</th>
+                    <th style="text-align: right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="op-files-tbody"></tbody>
+              </table>
+            </div>
+            <p id="op-files-empty" class="op-empty" hidden>No hay archivos en esta sección.</p>
+          </div>
+        </section>
+
+        <!-- ════════ VIEW 3: COPIAS DE SEGURIDAD (BACKUPS) ════════ -->
+        <section id="op-view-backups" class="op-view" hidden>
+          <div class="op-view__toolbar">
+            <p class="op-view__desc">Crea copias de seguridad físicas completas (Metadatos + Binarios MinIO comprimidos en ZIP) en el disco del servidor para garantizar permanencia y prevenir pérdidas.</p>
+            <div class="op-view__actions">
+              <button type="button" id="op-backup-config-btn" class="op-btn op-btn--ghost">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                <span>Programador Automático</span>
+              </button>
+              <button type="button" id="op-create-backup-btn" class="op-btn op-btn--primary">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Generar Backup Ahora</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Backup Status KPIs -->
+          <div class="op-backup-kpis" id="op-backup-kpis">
+            <div class="op-card op-card--kpi">
+              <div class="op-card__label">Almacenamiento en Disco Físico</div>
+              <div class="op-card__value" id="op-backup-disk-free">—</div>
+              <div class="op-card__sub" id="op-backup-disk-total">Espacio disponible en servidor</div>
+            </div>
+            <div class="op-card op-card--kpi">
+              <div class="op-card__label">Copias Guardadas en Disco</div>
+              <div class="op-card__value" id="op-backup-count">0</div>
+              <div class="op-card__sub" id="op-backup-dir-sub">Directorio ./backups</div>
+            </div>
+            <div class="op-card op-card--kpi">
+              <div class="op-card__label">Estado del Programador</div>
+              <div class="op-card__value" id="op-backup-scheduler-status">—</div>
+              <div class="op-card__sub" id="op-backup-scheduler-detail">Frecuencia configurable</div>
+            </div>
+          </div>
+
+          <div class="op-panel">
+            <div class="op-panel__hd">
+              <div>
+                <h3>Historial de Copias de Seguridad en Disco</h3>
+                <p class="op-panel__sub">Descarga paquetes ZIP para almacenamiento offline o migración</p>
+              </div>
+            </div>
+            <div class="op-table-responsive">
+              <table class="op-table">
+                <thead>
+                  <tr>
+                    <th>Paquete de Backup</th>
+                    <th>Tipo</th>
+                    <th>Tamaño</th>
+                    <th>Fecha de Generación</th>
+                    <th style="text-align: right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="op-backups-tbody"></tbody>
+              </table>
+            </div>
+            <p id="op-backups-empty" class="op-empty" hidden>No hay copias de seguridad generadas todavía.</p>
+          </div>
+        </section>
+
+        <!-- ════════ VIEW 4: USUARIOS & APLICACIONES ════════ -->
+        <section id="op-view-users" class="op-view" hidden>
+          <div class="op-view__toolbar">
+            <p class="op-view__desc">Directorio consolidado de usuarios finales autenticados por aplicativo. Puedes auditar su actividad y asignar roles administrativos de proyecto.</p>
+          </div>
+
+          <div class="op-panel op-filters">
+            <label class="op-field op-field--inline">
+              <span>Buscar Usuario</span>
+              <input type="text" id="op-users-search" placeholder="Nombre o cédula..." />
+            </label>
+            <label class="op-field op-field--inline">
+              <span>Filtrar por Aplicación</span>
+              <select id="op-users-filter-app">
+                <option value="">Todas las aplicaciones</option>
+              </select>
+            </label>
+            <div class="op-filters__btns">
+              <button type="button" id="op-users-filter-btn" class="op-btn op-btn--primary">Filtrar</button>
+              <button type="button" id="op-users-clear-btn" class="op-btn op-btn--ghost">Limpiar</button>
+            </div>
+          </div>
+
+          <div class="op-panel">
+            <div class="op-table-responsive">
+              <table class="op-table">
+                <thead>
+                  <tr>
+                    <th>Usuario</th>
+                    <th>Cédula / ID</th>
+                    <th>Aplicación Consumidora</th>
+                    <th>Rol en Proyecto</th>
+                    <th>Primera Conexión</th>
+                    <th>Última Actividad</th>
+                    <th style="text-align: right;">Gestión de Rol</th>
+                  </tr>
+                </thead>
+                <tbody id="op-users-tbody"></tbody>
+              </table>
+            </div>
+            <p id="op-users-empty" class="op-empty" hidden>No se encontraron usuarios registrados.</p>
+          </div>
+        </section>
+
+        <!-- ════════ VIEW 5: API KEYS ════════ -->
+        <section id="op-view-api-keys" class="op-view" hidden>
+          <div class="op-view__toolbar">
+            <p class="op-view__desc">Las API Keys autentican a tus aplicaciones backend (Laravel, JSP, Node.js, .NET). Genera llaves y obtén snippets listos para integrar.</p>
+            <button type="button" id="op-create-key-btn" class="op-btn op-btn--primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <span>Nueva API Key</span>
+            </button>
+          </div>
+          <div class="op-panel">
+            <div class="op-table-responsive">
+              <table class="op-table" id="op-api-keys-table">
+                <thead>
+                  <tr>
+                    <th>Aplicación / Proyecto</th>
+                    <th>Clave de Acceso (Enmascarada)</th>
+                    <th>Estado</th>
+                    <th>Fecha de Creación</th>
+                    <th>Activa</th>
+                    <th style="text-align: right;">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="op-api-keys-tbody"></tbody>
+              </table>
+            </div>
+            <p id="op-api-keys-empty" class="op-empty" hidden>No hay API keys creadas todavía.</p>
+          </div>
+        </section>
+
+        <!-- ════════ VIEW 6: TRAZABILIDAD / AUDITORÍA ════════ -->
+        <section id="op-view-activity" class="op-view" hidden>
+          <div class="op-panel op-filters">
+            <label class="op-field op-field--inline">
+              <span>Desde</span>
+              <input type="date" id="op-filter-date-from" />
+            </label>
+            <label class="op-field op-field--inline">
+              <span>Hasta</span>
+              <input type="date" id="op-filter-date-to" />
+            </label>
+            <label class="op-field op-field--inline">
+              <span>Acción Realizada</span>
+              <select id="op-filter-action">
+                <option value="">Todas las acciones</option>
+                <option value="UPLOAD">UPLOAD (Subida)</option>
+                <option value="DOWNLOAD">DOWNLOAD (Descarga)</option>
+                <option value="DELETE">DELETE (Borrado a papelera)</option>
+                <option value="RESTORE">RESTORE (Restauración)</option>
+                <option value="PURGE">PURGE (Purga física)</option>
+                <option value="RENAME">RENAME (Renombrado)</option>
+                <option value="EDITOR_OPEN">EDITOR_OPEN (Apertura editor)</option>
+                <option value="EDITOR_SAVE">EDITOR_SAVE (Guardado OnlyOffice)</option>
+                <option value="CREATE_BLANK">CREATE_BLANK (Nuevo documento)</option>
+                <option value="CREATE_FOLDER">CREATE_FOLDER (Nueva carpeta)</option>
+                <option value="RENAME_FOLDER">RENAME_FOLDER (Renombrar carpeta)</option>
+                <option value="DELETE_FOLDER">DELETE_FOLDER (Borrar carpeta)</option>
+                <option value="MOVE_FILE">MOVE_FILE (Mover archivo)</option>
+              </select>
+            </label>
+            <label class="op-field op-field--inline">
+              <span>Cédula / Usuario</span>
+              <input type="text" id="op-filter-user-id" placeholder="Cédula o ID..." />
+            </label>
+            <div class="op-filters__btns">
+              <button type="button" id="op-filter-apply" class="op-btn op-btn--primary">Filtrar</button>
+              <button type="button" id="op-filter-clear" class="op-btn op-btn--ghost">Limpiar</button>
+            </div>
+          </div>
+
+          <div class="op-panel">
+            <div class="op-table-responsive">
+              <table class="op-table">
+                <thead>
+                  <tr>
+                    <th>Fecha &amp; Hora</th>
+                    <th>Acción</th>
+                    <th>Usuario &amp; Aplicación</th>
+                    <th>Archivo / Recurso</th>
+                    <th>Detalles Operación</th>
+                    <th>Dirección IP</th>
+                  </tr>
+                </thead>
+                <tbody id="op-activity-tbody"></tbody>
+              </table>
+            </div>
+            <p id="op-activity-empty" class="op-empty" hidden>No hay actividad registrada con los filtros seleccionados.</p>
+            <div class="op-pagination" id="op-activity-pagination"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- ════════ MODALES ════════ -->
+
+  <!-- Modal: Nueva API Key -->
+  <div id="op-key-modal" class="op-modal-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="op-key-modal-title">
+    <div class="op-modal op-modal--key">
+      <button type="button" class="op-modal__close" id="op-key-modal-x" aria-label="Cerrar modal" title="Cerrar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+
+      <div class="op-steps" id="op-modal-steps" aria-hidden="true">
+        <div class="op-step is-active" id="op-step-1">
+          <div class="op-step__bubble">1</div>
+          <span>Crear key</span>
+        </div>
+        <div class="op-step__line"></div>
+        <div class="op-step" id="op-step-2">
+          <div class="op-step__bubble">2</div>
+          <span>Copiar &amp; Integrar</span>
+        </div>
+      </div>
+
+      <h3 id="op-key-modal-title">Nueva API Key de Proyecto</h3>
+
+      <!-- Step 1 Form -->
+      <div id="op-key-modal-form">
+        <label class="op-field">
+          <span>Nombre del Aplicativo Consumidor</span>
+          <input type="text" id="op-new-key-name" maxlength="255" placeholder="Ej: Intranet RRHH, Portal Clientes, ERP..." />
+        </label>
+        <div class="op-info-card">
+          <svg class="op-info-card__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          <p>La API Key identifica a tu sistema backend de forma segura y aísla sus archivos del resto de aplicaciones.</p>
+        </div>
+        <div class="op-modal__actions">
+          <button type="button" id="op-key-modal-cancel" class="op-btn op-btn--ghost">Cancelar</button>
+          <button type="button" id="op-key-modal-create" class="op-btn op-btn--primary">Generar Clave</button>
+        </div>
+      </div>
+
+      <!-- Step 2 Result -->
+      <div id="op-key-modal-result" hidden>
+        <div class="op-alert op-alert--warning">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m10.29 3.86-8.49 14.7A1 1 0 0 0 2.67 20h16.66a1 1 0 0 0 .87-1.5L11.71 3.86a1 1 0 0 0-1.72 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>Guarda esta clave ahora: <strong>no volverá a mostrarse completa.</strong></span>
+        </div>
+
+        <div class="op-key-reveal">
+          <code id="op-new-key-value"></code>
+          <button type="button" id="op-new-key-copy" class="op-btn op-btn--ghost op-btn--sm">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span>Copiar</span>
+          </button>
+        </div>
+
+        <div class="op-integration">
+          <div class="op-integration__hd">
+            <p class="op-integration__title">Snippets de Integración Rápida</p>
+            <label class="op-field op-field--inline op-field--compact">
+              <span>Lenguaje / Framework:</span>
+              <select id="op-framework-select">
+                <option value="jsp">JSP / Java (Spring / Servlet)</option>
+                <option value="laravel">Laravel / PHP</option>
+                <option value="node">Node.js / Express / Next.js</option>
+                <option value="python">Python (Django / FastAPI / Flask)</option>
+                <option value="dotnet">.NET / C# (ASP.NET Core)</option>
+                <option value="direct">HTML Directo (Frontend puro / Zero-Backend)</option>
+                <option value="generic">Genérico (cURL / HTTP REST)</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="op-code-hd">
+            <span class="op-code-lang">1. Variable de Entorno (.env)</span>
+            <button type="button" id="op-copy-env-btn" class="op-btn op-btn--ghost op-btn--sm">Copiar .env</button>
+          </div>
+          <pre class="op-code-block"><code id="op-env-code"></code></pre>
+
+          <div class="op-code-hd">
+            <span class="op-code-lang">2. Backend (Genera Token)</span>
+            <button type="button" id="op-copy-backend-btn" class="op-btn op-btn--ghost op-btn--sm">Copiar Backend</button>
+          </div>
+          <pre class="op-code-block"><code id="op-backend-code"></code></pre>
+
+          <div class="op-code-hd">
+            <span class="op-code-lang">3. Frontend (Inyecta Widget)</span>
+            <button type="button" id="op-copy-frontend-btn" class="op-btn op-btn--ghost op-btn--sm">Copiar Frontend</button>
+          </div>
+          <pre class="op-code-block"><code id="op-frontend-code"></code></pre>
+        </div>
+
+        <div class="op-modal__actions">
+          <button type="button" id="op-key-modal-close" class="op-btn op-btn--primary">Finalizar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Confirmar Eliminar API Key -->
+  <div id="op-delete-key-modal" class="op-modal-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="op-del-title">
+    <div class="op-modal op-modal--confirm">
+      <button type="button" class="op-modal__close" id="op-delete-key-modal-x" aria-label="Cerrar modal" title="Cerrar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="op-confirm__icon" aria-hidden="true">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+      </div>
+      <h3 id="op-del-title">Eliminar API Key</h3>
+      <p class="op-confirm__desc">Vas a eliminar permanentemente la key <strong id="op-delete-key-name"></strong>. Todos los clientes que la usen perderán acceso de inmediato.</p>
+      <div class="op-alert op-alert--danger">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+        <span>Esta acción es <strong>irreversible</strong>.</span>
+      </div>
+      <div class="op-modal__actions">
+        <button type="button" id="op-delete-key-cancel" class="op-btn op-btn--ghost">Cancelar</button>
+        <button type="button" id="op-delete-key-confirm" class="op-btn op-btn--danger-solid" data-key-id="">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Configuración de Backups Automáticos -->
+  <div id="op-backup-modal" class="op-modal-overlay" hidden role="dialog" aria-modal="true" aria-labelledby="op-backup-modal-title">
+    <div class="op-modal" style="max-width: 480px;">
+      <button type="button" class="op-modal__close" id="op-backup-modal-x" aria-label="Cerrar modal" title="Cerrar">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <h3 id="op-backup-modal-title">Configuración de Copias de Seguridad Automáticas</h3>
+      <p class="op-confirm__desc">Ajusta la frecuencia del respaldo físico en disco y la política de retención automática.</p>
+      
+      <div style="display:flex; flex-direction:column; gap:16px; margin: 20px 0;">
+        <label class="op-switch-label">
+          <span>Habilitar copias automáticas en segundo plano</span>
+          <label class="op-switch">
+            <input type="checkbox" id="op-cfg-backup-enabled" checked />
+            <span class="op-switch__track"></span>
+          </label>
+        </label>
+
+        <label class="op-field">
+          <span>Intervalo de respaldo (en horas)</span>
+          <input type="number" id="op-cfg-backup-interval" min="1" max="720" value="24" placeholder="Ej: 24 (cada día)" />
+        </label>
+
+        <label class="op-field">
+          <span>Máximo de copias a retener en disco</span>
+          <input type="number" id="op-cfg-backup-max" min="1" max="100" value="10" placeholder="Ej: 10" />
+          <small style="font-size:11.5px; color:var(--admin-text-secondary); margin-top:4px;">Cuando se exceda este límite, los backups más antiguos se purgarán automáticamente para cuidar el disco.</small>
+        </label>
+      </div>
+
+      <div class="op-modal__actions">
+        <button type="button" id="op-backup-modal-cancel" class="op-btn op-btn--ghost">Cancelar</button>
+        <button type="button" id="op-backup-modal-save" class="op-btn op-btn--primary">Guardar Configuración</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="admin.js?v=2.6"></script>
+</body>
+</html>

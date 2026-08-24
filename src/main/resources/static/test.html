@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Office Platform — Test</title>
+  <style>
+    body { margin: 0; font-family: system-ui, -apple-system, sans-serif; }
+    .op-test-bar {
+      padding: 16px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center;
+      border-bottom: 1px solid #e5e7eb; background: #fafafa;
+    }
+    .op-test-bar button {
+      padding: 10px 16px; border: 1px solid #d1d5db; border-radius: 8px;
+      background: #fff; cursor: pointer; font-size: 14px;
+    }
+    .op-test-bar button:hover { background: #f3f4f6; }
+    .op-test-bar button:disabled { opacity: .5; cursor: not-allowed; }
+    .op-test-status { color: #6b7280; font-size: 13px; margin-left: auto; }
+  </style>
+</head>
+<body>
+  <!-- Botones que usan la API pública window.OfficePlatform.openEditor() -->
+  <div class="op-test-bar">
+    <button onclick="OfficePlatform.openEditor({ type: 'document' })">📄 Nuevo documento</button>
+    <button onclick="OfficePlatform.openEditor({ type: 'spreadsheet' })">📊 Nueva hoja de cálculo</button>
+    <button onclick="OfficePlatform.openEditor({ type: 'presentation' })">📽️ Nueva presentación</button>
+    <span class="op-test-status" id="op-test-status">Inicializando…</span>
+  </div>
+
+  <!-- Widget normal embebido (gestor completo) -->
+  <div id="office-platform" style="height: 80vh;"></div>
+
+  <script>
+    // Página de prueba SOLO para desarrollo. En una integración real, el proyecto
+    // consumidor resuelve el widget token en su BACKEND (nunca expone la API key en el HTML).
+    (function () {
+      var SERVER = window.location.origin;
+      // Reemplazar por una API Key generada desde el panel admin
+      // (POST /api/admin/api-keys). Nunca versionar una key real.
+      var API_KEY = 'TU_API_KEY';
+      var CEDULA = '0000000000';
+      var NOMBRE = 'Usuario Demo';
+      var statusEl = document.getElementById('op-test-status');
+
+      fetch(SERVER + '/api/auth/resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cedula: CEDULA, nombre: NOMBRE, apiKey: API_KEY })
+      })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j || !j.success || !j.data || !j.data.widgetToken) {
+          throw new Error((j && j.message) || 'No se pudo resolver el widget token');
+        }
+        var s = document.createElement('script');
+        s.src = '/office-platform-widget.js';
+        s.setAttribute('data-token', j.data.widgetToken);
+        s.setAttribute('data-container', 'office-platform');
+        s.setAttribute('data-server', SERVER);
+        s.setAttribute('data-user-id', CEDULA);
+        s.setAttribute('data-user-name', NOMBRE);
+        document.body.appendChild(s);
+        statusEl.textContent = 'Listo · cédula ' + CEDULA;
+      })
+      .catch(function (err) {
+        statusEl.textContent = 'Error: ' + err.message;
+        console.error('[test.html]', err);
+      });
+    })();
+  </script>
+</body>
+</html>
