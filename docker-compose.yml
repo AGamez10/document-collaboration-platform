@@ -66,6 +66,13 @@ services:
       APP_INTERNAL_URL: http://office-platform-app:8080
       OFFICE_PLATFORM_PUBLIC_URL: ${OFFICE_PLATFORM_PUBLIC_URL:-http://office-platform-app:8080}
       OFFICE_PLATFORM_CORS_ALLOWED_ORIGINS: ${OFFICE_PLATFORM_CORS_ALLOWED_ORIGINS:-*}
+      # Universal decentralized storage: widen the allowed MIME list so the manager
+      # accepts emails (.eml/.msg), CAD drawings (.dwg/.dxf), archives, images and
+      # arbitrary binaries (octet-stream) in addition to Office/PDF. Comma-separated,
+      # NO spaces (the service does allowedMimeTypesRaw.split(",") with exact match).
+      # Overrides application.yml office-platform.storage.allowed-mime-types via
+      # Spring relaxed binding. Rollback: remove this line and restart the container.
+      OFFICE_PLATFORM_STORAGE_ALLOWED_MIME_TYPES: "application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,message/rfc822,application/vnd.ms-outlook,application/octet-stream,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/x-7z-compressed,application/gzip,application/x-tar,image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/bmp,image/tiff,image/vnd.dwg,image/vnd.dxf,application/acad,application/dxf,application/dwg,application/x-dwg,application/x-autocad,text/plain,text/csv,application/json,application/xml,text/xml,application/vnd.oasis.opendocument.text,application/vnd.oasis.opendocument.spreadsheet,application/vnd.oasis.opendocument.presentation,application/rtf,text/html"
     ports:
       - "8080:8080"
     volumes:
