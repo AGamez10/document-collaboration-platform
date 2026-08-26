@@ -5,7 +5,10 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import org.springframework.beans.factory.annotation.Value;
@@ -109,15 +112,55 @@ public class FileServiceImpl implements FileService {
         return fileRepository.findAllByApiKeyIdAndUserIdAndDeletedAtIsNull(apiKeyId, userId.trim());
     }
 
+    /**
+     * Trash of the calling user, resolved by ownership instead of by scope.
+     *
+     * <p>Scope-based filtering broke this listing: a shared file is stored with
+     * {@code user_id = null}, so once its author trashed it, the private trash
+     * ({@code user_id = cédula}) no longer matched it while the shared trash
+     * ({@code user_id IS NULL}) showed it to the whole project. Ownership is the correct
+     * criterion — a trashed file belongs in its author's trash and nobody else's.
+     *
+     * <p>{@code createdByUserId} is the strong match. Rows created before that column existed
+     * carry only {@code createdByName}, so those are matched by display name, and legacy private
+     * rows are still matched by {@code user_id} to avoid losing anything already in the trash.
+     * The {@code scope} parameter is kept for API compatibility and no longer filters.
+     */
     @Override
     public List<FileEntity> listTrash(Long apiKeyId, String userId, String scope) {
-        if ("shared".equalsIgnoreCase(scope)) {
-            return fileRepository.findAllByApiKeyIdAndUserIdIsNullAndDeletedAtIsNotNull(apiKeyId);
-        }
-        if (userId == null || userId.isBlank()) {
+        return listTrash(apiKeyId, userId, null, scope);
+    }
+
+    @Override
+    public List<FileEntity> listTrash(Long apiKeyId, String userId, String userName, String scope) {
+        String resolvedUserId = (userId != null && !userId.isBlank()) ? userId.trim() : null;
+        String resolvedUserName = (userName != null && !userName.isBlank()) ? userName.trim() : null;
+
+        if (resolvedUserId == null && resolvedUserName == null) {
             return List.of();
         }
-        return fileRepository.findAllByApiKeyIdAndUserIdAndDeletedAtIsNotNull(apiKeyId, userId.trim());
+
+        Map<Long, FileEntity> byId = new LinkedHashMap<>();
+
+        if (resolvedUserId != null) {
+            fileRepository.findAllByApiKeyIdAndCreatedByUserIdAndDeletedAtIsNotNull(apiKeyId, resolvedUserId)
+                    .forEach(file -> byId.put(file.getId(), file));
+            // Legacy private rows: owned through user_id, created before created_by_user_id existed.
+            fileRepository.findAllByApiKeyIdAndUserIdAndDeletedAtIsNotNull(apiKeyId, resolvedUserId)
+                    .forEach(file -> byId.putIfAbsent(file.getId(), file));
+        }
+
+        if (resolvedUserName != null) {
+            fileRepository
+                    .findAllByApiKeyIdAndCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNull(
+                            apiKeyId, resolvedUserName)
+                    .forEach(file -> byId.putIfAbsent(file.getId(), file));
+        }
+
+        return byId.values().stream()
+                .sorted(Comparator.comparing(
+                        FileEntity::getDeletedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
     }
 
     @Override
@@ -272,6 +315,12 @@ public class FileServiceImpl implements FileService {
     @Override
     public FileEntity getFile(Long fileId, Long apiKeyId) {
         return fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNull(fileId, apiKeyId)
+            .orElseThrow(() -> new FileNotFoundException(fileId));
+    }
+
+    @Override
+    public FileEntity getFileIncludingTrashed(Long fileId, Long apiKeyId) {
+        return fileRepository.findByIdAndApiKeyId(fileId, apiKeyId)
             .orElseThrow(() -> new FileNotFoundException(fileId));
     }
 

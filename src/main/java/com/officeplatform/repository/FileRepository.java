@@ -52,6 +52,28 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
 
     Optional<FileEntity> findByIdAndApiKeyIdAndDeletedAtIsNotNull(Long id, Long apiKeyId);
 
+    /**
+     * Lookup that also matches trashed files. Permission resolution must work on trashed
+     * resources: restore and purge operate precisely on files whose deletedAt is not null,
+     * so a lookup restricted to DeletedAtIsNull can never authorize them.
+     */
+    Optional<FileEntity> findByIdAndApiKeyId(Long id, Long apiKeyId);
+
+    /**
+     * Trash listing driven by ownership rather than by scope. A shared file is stored with
+     * user_id = null, so filtering the trash by user_id hides it from its own author while
+     * exposing it to every other member of the project.
+     */
+    List<FileEntity> findAllByApiKeyIdAndCreatedByUserIdAndDeletedAtIsNotNull(
+            Long apiKeyId, String createdByUserId);
+
+    /**
+     * Fallback for rows created before created_by_user_id existed, which only carry the
+     * creator's display name.
+     */
+    List<FileEntity> findAllByApiKeyIdAndCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNull(
+            Long apiKeyId, String createdByName);
+
     Optional<FileEntity> findByUuid(String uuid);
 
     // Admin-only queries: not scoped by apiKeyId, used by the cross-tenant admin panel.

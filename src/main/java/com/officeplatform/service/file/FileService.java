@@ -17,6 +17,13 @@ public interface FileService {
 
     List<FileEntity> listTrash(Long apiKeyId, String userId, String scope);
 
+    /**
+     * Trash of the calling user, resolved by ownership instead of by scope.
+     *
+     * @param userName display name, used to match legacy rows that predate created_by_user_id
+     */
+    List<FileEntity> listTrash(Long apiKeyId, String userId, String userName, String scope);
+
     /** Searches active files by name (LIKE %term%) across all folders, scoped to private or shared. */
     List<FileEntity> searchFiles(Long apiKeyId, String term, String userId, String scope);
 
@@ -30,6 +37,14 @@ public interface FileService {
     FileEntity createBlankPresentation(Long apiKeyId, Long folderId, String userId, String userName, String scope);
 
     FileEntity getFile(Long fileId, Long apiKeyId);
+
+    /**
+     * Lookup that also matches trashed files, so callers can authorize operations on the
+     * trash (restore, purge) and still get a 404 — not a 403 — for a file that is simply gone.
+     *
+     * @throws com.officeplatform.exception.FileNotFoundException if no such file exists in the tenant
+     */
+    FileEntity getFileIncludingTrashed(Long fileId, Long apiKeyId);
 
     FileEntity renameFile(Long fileId, Long apiKeyId, String newName, String userId, String userName);
 

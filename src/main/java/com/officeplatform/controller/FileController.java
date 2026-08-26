@@ -113,7 +113,11 @@ public class FileController {
     public ResponseEntity<ApiResponse<List<FileResponse>>> listTrash(
             @RequestParam(required = false) String scope,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
-        List<FileResponse> files = fileService.listTrash(principal.getApiKeyId(), principal.resolveUserId(null), scope).stream()
+        List<FileResponse> files = fileService.listTrash(
+                        principal.getApiKeyId(),
+                        principal.resolveUserId(null),
+                        principal.resolveUserName(null),
+                        scope).stream()
                 .map(this::toFileResponse)
                 .toList();
 
@@ -377,11 +381,7 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level = shareService.getEffectivePermission(
-                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal);
-        if (level != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
-            throw new com.officeplatform.exception.ShareAccessDeniedException("Se requieren permisos de edición para eliminar este archivo.");
-        }
+        assertOwnerOrAdmin(id, principal, "eliminar");
 
         fileService.softDeleteFile(id, principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
@@ -401,11 +401,7 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level = shareService.getEffectivePermission(
-                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal);
-        if (level != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
-            throw new com.officeplatform.exception.ShareAccessDeniedException("Se requieren permisos de edición para restaurar este archivo.");
-        }
+        assertOwnerOrAdmin(id, principal, "restaurar");
 
         FileEntity fileEntity = fileService.restoreFile(id, principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
@@ -426,11 +422,7 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level = shareService.getEffectivePermission(
-                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal);
-        if (level != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
-            throw new com.officeplatform.exception.ShareAccessDeniedException("Se requieren permisos de edición para eliminar permanentemente este archivo.");
-        }
+        assertOwnerOrAdmin(id, principal, "eliminar permanentemente");
 
         fileService.purgeFile(id, principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
@@ -441,6 +433,29 @@ public class FileController {
                 .build();
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Destructive operations stay with the author or a project admin.
+     *
+     * <p>Deliberately stricter than the EDIT check used by rename/move: an unrestricted file in
+     * the shared space resolves to EDIT for every member of the project, so gating deletion on
+     * EDIT let any member delete anybody else's work.
+     *
+     * @param action verb used to build the error message ("eliminar", "restaurar", ...)
+     * @throws ShareAccessDeniedException translated to HTTP 403 by GlobalExceptionHandler
+     */
+    private void assertOwnerOrAdmin(Long fileId, ApiKeyPrincipal principal, String action) {
+        // Resolved first so a file that does not exist answers 404 instead of "no eres el
+        // propietario", which would be misleading for an already purged file.
+        fileService.getFileIncludingTrashed(fileId, principal.getApiKeyId());
+
+        boolean allowed = shareService.isOwnerOrAdmin(
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, fileId, principal);
+        if (!allowed) {
+            throw new com.officeplatform.exception.ShareAccessDeniedException(
+                    "No tienes permisos para " + action + " este archivo, no eres el propietario.");
+        }
     }
 
     private FileResponse toFileResponse(FileEntity fileEntity) {
