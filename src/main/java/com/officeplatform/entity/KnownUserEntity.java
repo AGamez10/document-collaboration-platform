@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Index;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -23,10 +24,17 @@ import lombok.NoArgsConstructor;
  * {@code ActivityLogRecorder}). Uniqueness is per (apiKeyId, userId).
  */
 @Entity
-@Table(name = "known_users", indexes = {
-        @Index(name = "idx_known_user_api_key_id", columnList = "api_key_id"),
-        @Index(name = "idx_known_user_api_key_user", columnList = "api_key_id, user_id", unique = true)
-})
+@Table(
+        name = "known_users",
+        indexes = {
+                @Index(name = "idx_known_user_api_key_id", columnList = "api_key_id"),
+                @Index(name = "idx_known_user_api_key_user", columnList = "api_key_id, user_id", unique = true)
+        },
+        // Declared as a named table constraint as well as a unique index so the rule is explicit in
+        // the schema and violations surface with a stable constraint name the service can react to.
+        uniqueConstraints = {
+                @UniqueConstraint(name = "uk_known_user_api_key_user", columnNames = { "api_key_id", "user_id" })
+        })
 @Data
 @NoArgsConstructor
 @AllArgsConstructor

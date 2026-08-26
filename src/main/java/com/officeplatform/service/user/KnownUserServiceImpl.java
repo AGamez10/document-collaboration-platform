@@ -3,6 +3,7 @@ package com.officeplatform.service.user;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,22 +40,42 @@ public class KnownUserServiceImpl implements KnownUserService {
         LocalDateTime now = LocalDateTime.now();
 
         KnownUserEntity user = knownUserRepository.findByApiKeyIdAndUserId(apiKeyId, resolvedUserId).orElse(null);
-        if (user == null) {
-            user = KnownUserEntity.builder()
-                    .apiKeyId(apiKeyId)
-                    .userId(resolvedUserId)
-                    .displayName(resolvedName)
-                    .role(ROLE_USER)
-                    .firstSeenAt(now)
-                    .lastSeenAt(now)
-                    .build();
-        } else {
-            user.setLastSeenAt(now);
-            if (resolvedName != null) {
-                user.setDisplayName(resolvedName);
-            }
+        if (user != null) {
+            applyVisit(user, resolvedName, now);
+            knownUserRepository.save(user);
+            return;
         }
-        knownUserRepository.save(user);
+
+        KnownUserEntity created = KnownUserEntity.builder()
+                .apiKeyId(apiKeyId)
+                .userId(resolvedUserId)
+                .displayName(resolvedName)
+                .role(ROLE_USER)
+                .firstSeenAt(now)
+                .lastSeenAt(now)
+                .build();
+
+        try {
+            knownUserRepository.saveAndFlush(created);
+        } catch (DataIntegrityViolationException race) {
+            // Two concurrent first-sight requests for the same identifier: the unique constraint on
+            // (api_key_id, user_id) let exactly one insert through. Re-read and update that row
+            // instead of surfacing a duplicate — the constraint is the source of truth, not the
+            // preceding read, which is why the insert is attempted rather than trusted blindly.
+            KnownUserEntity existing = knownUserRepository
+                    .findByApiKeyIdAndUserId(apiKeyId, resolvedUserId)
+                    .orElseThrow(() -> race);
+            applyVisit(existing, resolvedName, now);
+            knownUserRepository.save(existing);
+        }
+    }
+
+    /** Refreshes last-seen and, when a name is supplied, the display name. */
+    private void applyVisit(KnownUserEntity user, String resolvedName, LocalDateTime now) {
+        user.setLastSeenAt(now);
+        if (resolvedName != null) {
+            user.setDisplayName(resolvedName);
+        }
     }
 
     @Override

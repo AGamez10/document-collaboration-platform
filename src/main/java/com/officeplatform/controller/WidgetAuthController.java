@@ -15,6 +15,9 @@ import com.officeplatform.dto.response.WidgetTokenResponse;
 import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.security.widget.WidgetTokenService;
+import com.officeplatform.service.user.KnownUserService;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Endpoint público (no requiere X-Api-Key ni autenticación admin) que
@@ -47,17 +50,21 @@ import com.officeplatform.security.widget.WidgetTokenService;
  * <p>El {@code widgetToken} debe inyectarse como atributo {@code data-token}
  * en el tag {@code <script>} del widget en el HTML del aplicativo consumidor.
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/auth")
 public class WidgetAuthController {
 
     private final ApiKeyRepository    apiKeyRepository;
     private final WidgetTokenService  widgetTokenService;
+    private final KnownUserService    knownUserService;
 
     public WidgetAuthController(ApiKeyRepository apiKeyRepository,
-                                WidgetTokenService widgetTokenService) {
+                                WidgetTokenService widgetTokenService,
+                                KnownUserService knownUserService) {
         this.apiKeyRepository   = apiKeyRepository;
         this.widgetTokenService = widgetTokenService;
+        this.knownUserService   = knownUserService;
     }
 
     /**
@@ -102,7 +109,25 @@ public class WidgetAuthController {
                 apiKeyEntity.getId()
         );
 
-        // 3. Retornar
+        // 3. Registrar/actualizar al usuario en el directorio del proyecto.
+        // Es un upsert por (apiKeyId, cédula): si la cédula ya existe se actualiza su nombre y su
+        // última actividad, nunca se duplica. Hasta ahora el alta solo ocurría en la primera
+        // operación sobre archivos, así que quien iniciaba sesión sin operar no aparecía en el
+        // directorio y un cambio de nombre no se reflejaba. Nunca debe tumbar la autenticación:
+        // el token ya es válido y el directorio es información secundaria.
+        // Sin cédula, getResolvedUserId() devuelve "anon": registrarlo crearía una entrada
+        // compartida por todos los llamadores anónimos, así que solo se registra la identidad real.
+        boolean hasRealIdentity = request.getCedula() != null && !request.getCedula().isBlank();
+        if (hasRealIdentity) {
+            try {
+                knownUserService.registerActivity(apiKeyEntity.getId(), userId, nombre);
+            } catch (RuntimeException ex) {
+                log.warn("No se pudo registrar al usuario {} en el directorio del proyecto {}: {}",
+                        userId, apiKeyEntity.getId(), ex.getMessage());
+            }
+        }
+
+        // 4. Retornar
         WidgetTokenResponse data = new WidgetTokenResponse(token, WidgetTokenService.EXPIRES_IN_SECONDS);
 
         ApiResponse<WidgetTokenResponse> response = ApiResponse.<WidgetTokenResponse>builder()
