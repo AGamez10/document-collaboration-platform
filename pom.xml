@@ -110,6 +110,16 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!--
+			In-memory database used only by the test sources, so the suite runs without
+			PostgreSQL. Test scope: it is not packaged into the application jar, and the
+			runtime database stays PostgreSQL.
+		-->
+		<dependency>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<scope>test</scope>
+		</dependency>
 		<dependency>
 			<groupId>org.springframework.security</groupId>
 			<artifactId>spring-security-test</artifactId>
