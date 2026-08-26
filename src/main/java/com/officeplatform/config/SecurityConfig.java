@@ -71,6 +71,10 @@ public class SecurityConfig {
                         "/api/health",
                         "/api/auth/resolve",          // <-- endpoint público para Widget Token
                         "/error",
+                        // springdoc.swagger-ui.path is /swagger-ui.html, and that exact path is not
+                        // covered by /swagger-ui/** — without it the configured entry point answers
+                        // 403 and only the redirect target is reachable.
+                        "/swagger-ui.html",
                         "/swagger-ui/**",
                         "/api-docs/**",
                         "/api/onlyoffice/callback",
