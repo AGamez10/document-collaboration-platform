@@ -304,7 +304,10 @@ public class ShareServiceImpl implements ShareService {
         String resourceUserId = null;
 
         if (resourceType == ResourceType.FILE) {
-            FileEntity file = fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNull(resourceId, apiKeyId).orElse(null);
+            // Includes trashed files on purpose: restore and purge act on files whose
+            // deletedAt is not null, so restricting this lookup to live files made every
+            // restore/purge request resolve to a null permission and fail with 403.
+            FileEntity file = fileRepository.findByIdAndApiKeyId(resourceId, apiKeyId).orElse(null);
             if (file == null) {
                 return null;
             }
@@ -381,6 +384,37 @@ public class ShareServiceImpl implements ShareService {
             }
         }
         return highest;
+    }
+
+    @Override
+    public boolean isOwnerOrAdmin(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {
+        Long apiKeyId = principal.getApiKeyId();
+        String userId = principal.resolveUserId(null);
+
+        if (isProjectAdmin(apiKeyId, userId)) {
+            return true;
+        }
+
+        String creatorUserId;
+        String creatorName;
+
+        if (resourceType == ResourceType.FILE) {
+            FileEntity file = fileRepository.findByIdAndApiKeyId(resourceId, apiKeyId).orElse(null);
+            if (file == null) {
+                return false;
+            }
+            creatorUserId = file.getCreatedByUserId();
+            creatorName = file.getCreatedByName();
+        } else {
+            FolderEntity folder = folderRepository.findByIdAndApiKeyId(resourceId, apiKeyId).orElse(null);
+            if (folder == null) {
+                return false;
+            }
+            creatorUserId = folder.getCreatedByUserId();
+            creatorName = folder.getCreatedByName();
+        }
+
+        return isCreator(creatorUserId, creatorName, principal);
     }
 
     private void assertCanManage(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {

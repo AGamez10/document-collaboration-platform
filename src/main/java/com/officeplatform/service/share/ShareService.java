@@ -38,4 +38,17 @@ public interface ShareService {
 
     com.officeplatform.entity.SharePermissionEntity.PermissionLevel getEffectivePermission(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal);
 
+    /**
+     * Whether the caller owns the resource or administers the project.
+     *
+     * <p>Stricter than {@link #getEffectivePermission}: an unrestricted resource in the shared
+     * space grants EDIT to every member of the project, which is the right rule for editing but
+     * the wrong one for destructive operations. Deleting, restoring and purging must stay with
+     * the author or a project admin.
+     *
+     * @return {@code true} when the caller created the resource or holds the admin role;
+     *         {@code false} when the resource does not exist or belongs to somebody else
+     */
+    boolean isOwnerOrAdmin(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal);
+
 }
