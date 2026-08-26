@@ -389,7 +389,7 @@ public class ShareServiceImpl implements ShareService {
     @Override
     public boolean isOwnerOrAdmin(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {
         Long apiKeyId = principal.getApiKeyId();
-        String userId = principal.resolveUserId(null);
+        String userId = normalizeIdentity(principal.resolveUserId(null));
 
         if (isProjectAdmin(apiKeyId, userId)) {
             return true;
@@ -431,12 +431,37 @@ public class ShareServiceImpl implements ShareService {
      * back to the creator's display name (createdByName == JWT name).
      */
     private boolean isCreator(String creatorUserId, String creatorName, ApiKeyPrincipal principal) {
-        String userId = principal.resolveUserId(null);
-        if (creatorUserId != null && userId != null && creatorUserId.equals(userId)) {
-            return true;
+        String viewerUserId = normalizeIdentity(principal.resolveUserId(null));
+        String storedUserId = normalizeIdentity(creatorUserId);
+
+        // Strong signal: both sides carry an identifier, so it decides in both directions.
+        // A mismatch here must NOT fall through to the display-name check — that fallback is
+        // weaker and would let a namesake claim authorship over the stored identifier.
+        if (storedUserId != null && viewerUserId != null) {
+            return storedUserId.equalsIgnoreCase(viewerUserId);
         }
-        String userName = principal.resolveUserName(null);
-        return creatorName != null && userName != null && creatorName.equals(userName);
+
+        // Fallback, reached only when one of the two identifiers is missing: rows created before
+        // created_by_user_id existed, and callers that authenticated without an identifier.
+        // Comparing on the display name is the best signal available for those.
+        String viewerName = normalizeIdentity(principal.resolveUserName(null));
+        String storedName = normalizeIdentity(creatorName);
+        return storedName != null && viewerName != null && storedName.equalsIgnoreCase(viewerName);
+    }
+
+    /**
+     * Trims surrounding whitespace and collapses blank values to {@code null}.
+     *
+     * <p>Identity reaches the database raw — {@code created_by_user_id} is written straight from
+     * the token claim — so a stray space on either side would otherwise turn a legitimate author
+     * into a 403. Comparisons on the normalized value are case-insensitive.
+     */
+    private static String normalizeIdentity(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     private boolean isProjectAdmin(Long apiKeyId, String userId) {
