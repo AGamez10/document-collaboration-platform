@@ -357,7 +357,7 @@ Marcar `closedAt` en la base de datos no desconecta a nadie: el usuario sigue ed
 Documentarla es parte del trabajo:
 
 - **Sin migraciones versionadas.** El esquema se gestiona con `spring.jpa.hibernate.ddl-auto=update`. Adecuado para iterar rápido, insuficiente para producción a largo plazo: el siguiente paso natural es Flyway o Liquibase.
-- **Cobertura de tests baja.** La infraestructura de test (`spring-boot-starter-test`, `spring-security-test`) está configurada, pero la suite es mínima. Las áreas prioritarias son el aislamiento por *scope* y la resolución de permisos.
+- **Cobertura de tests parcial.** La suite corre en verde y sin infraestructura: usa H2 en memoria (`scope` de test, no viaja en el JAR) y sustituye el cliente de MinIO por un *mock*. Cubre el arranque del contexto y la resolución de autoría para operaciones destructivas. Falta cubrir el aislamiento por *scope* y el filtrado de permisos compartidos.
 - **Editor y compartición entre proyectos.** Abrir en el editor un recurso compartido desde otro proyecto puede fallar: el endpoint del editor está limitado al proyecto del llamador y todavía no consulta la tabla de permisos.
 - **`FolderEntity` sin *soft delete*.** Los archivos tienen `deletedAt`; las carpetas aún no.
 
