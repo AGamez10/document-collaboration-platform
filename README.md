@@ -357,6 +357,8 @@ Marcar `closedAt` en la base de datos no desconecta a nadie: el usuario sigue ed
 Documentarla es parte del trabajo:
 
 - **Sin migraciones versionadas.** El esquema se gestiona con `spring.jpa.hibernate.ddl-auto=update`. Adecuado para iterar rápido, insuficiente para producción a largo plazo: el siguiente paso natural es Flyway o Liquibase.
+
+  Esto ya causó una incidencia real y merece detalle. Hibernate crea una restricción `CHECK` con los valores del enum cuando genera la tabla `activity_log`, y `ddl-auto=update` **nunca la modifica después**. Al añadir las acciones `SHARE` y `UNSHARE` al enum, toda base de datos creada antes las rechazaba, y `POST /api/share` devolvía 500. Reconciliar la restricción en una base existente requiere un `ALTER TABLE` manual — exactamente el trabajo que una herramienta de migraciones haría sola.
 - **Cobertura de tests parcial.** La suite corre en verde y sin infraestructura: usa H2 en memoria (`scope` de test, no viaja en el JAR) y sustituye el cliente de MinIO por un *mock*. Cubre el arranque del contexto y la resolución de autoría para operaciones destructivas. Falta cubrir el aislamiento por *scope* y el filtrado de permisos compartidos.
 - **Editor y compartición entre proyectos.** Abrir en el editor un recurso compartido desde otro proyecto puede fallar: el endpoint del editor está limitado al proyecto del llamador y todavía no consulta la tabla de permisos.
 - **`FolderEntity` sin *soft delete*.** Los archivos tienen `deletedAt`; las carpetas aún no.
