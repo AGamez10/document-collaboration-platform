@@ -85,6 +85,28 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
     }
 
+    @ExceptionHandler(UnsupportedFileTypeException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnsupportedFileTypeException(
+            UnsupportedFileTypeException ex, HttpServletRequest request) {
+
+        ErrorResponse error = ErrorResponse.builder()
+            .code("UNSUPPORTED_FILE_TYPE")
+            .details(ex.getMessage())
+            .path(request.getRequestURI())
+            .timestamp(System.currentTimeMillis() / 1000)
+            .build();
+
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+            .success(false)
+            .timestamp(LocalDateTime.now())
+            .message(ex.getMessage())
+            .metadata(Map.of("error", error))
+            .build();
+
+        log.warn("Carga rechazada por tipo de archivo en {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(response);
+    }
+
     @ExceptionHandler(StorageException.class)
     public ResponseEntity<ApiResponse<Void>> handleStorageException(
             StorageException ex, HttpServletRequest request) {

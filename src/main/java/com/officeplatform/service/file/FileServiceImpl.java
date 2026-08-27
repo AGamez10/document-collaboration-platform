@@ -23,6 +23,7 @@ import com.officeplatform.entity.FolderEntity;
 import com.officeplatform.exception.FileNotFoundException;
 import com.officeplatform.exception.FolderNotFoundException;
 import com.officeplatform.exception.StorageException;
+import com.officeplatform.exception.UnsupportedFileTypeException;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.service.activity.ActivityLogRecorder;
@@ -191,7 +192,13 @@ public class FileServiceImpl implements FileService {
 
         String contentType = file.getContentType();
         if (!MimeUtils.isAllowed(contentType, allowedMimeTypes)) {
-            throw new StorageException("Tipo de archivo no permitido: " + contentType);
+            throw new UnsupportedFileTypeException("Tipo de archivo no permitido: " + contentType);
+        }
+        // The declared content type is chosen by the client, so on its own it validates nothing:
+        // an executable sent as application/pdf used to be accepted. The extension must agree.
+        if (!MimeUtils.matchesExtension(request.getOriginalFileName(), contentType)) {
+            throw new UnsupportedFileTypeException(
+                    "La extensión del archivo no corresponde al tipo declarado (" + contentType + ")");
         }
 
         String uuid = UUID.randomUUID().toString();
