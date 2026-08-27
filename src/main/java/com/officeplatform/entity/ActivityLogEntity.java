@@ -41,6 +41,16 @@ public class ActivityLogEntity {
     @Column(name = "user_name")
     private String userName;
 
+    /**
+     * Hibernate emits a CHECK constraint listing the enum values when it creates this table, and
+     * {@code ddl-auto=update} never alters it afterwards. A value added to {@link ActivityAction}
+     * later is therefore rejected by any database created before it existed — adding SHARE and
+     * UNSHARE is what made {@code POST /api/share} fail with a 500 on the running instance.
+     *
+     * <p>Writes go through {@code ActivityLogWriter} in their own transaction so a rejected entry
+     * can no longer roll back the business operation that triggered it. Reconciling the constraint
+     * on an existing database still has to be done explicitly; see README, "Deuda técnica conocida".
+     */
     @Enumerated(EnumType.STRING)
     @Column(name = "action", nullable = false)
     private ActivityAction action;

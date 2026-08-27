@@ -12,7 +12,6 @@ import com.officeplatform.entity.ActivityAction;
 import com.officeplatform.entity.ActivityLogEntity;
 import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.KnownUserEntity;
-import com.officeplatform.repository.ActivityLogRepository;
 import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.KnownUserRepository;
 import com.officeplatform.service.user.KnownUserService;
@@ -23,17 +22,17 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ActivityLogRecorder {
 
-    private final ActivityLogRepository activityLogRepository;
+    private final ActivityLogWriter activityLogWriter;
     private final KnownUserService knownUserService;
     private final KnownUserRepository knownUserRepository;
     private final ApiKeyRepository apiKeyRepository;
 
     public ActivityLogRecorder(
-            ActivityLogRepository activityLogRepository,
+            ActivityLogWriter activityLogWriter,
             KnownUserService knownUserService,
             KnownUserRepository knownUserRepository,
             ApiKeyRepository apiKeyRepository) {
-        this.activityLogRepository = activityLogRepository;
+        this.activityLogWriter = activityLogWriter;
         this.knownUserService = knownUserService;
         this.knownUserRepository = knownUserRepository;
         this.apiKeyRepository = apiKeyRepository;
@@ -76,7 +75,8 @@ public class ActivityLogRecorder {
                     .timestamp(LocalDateTime.now())
                     .build();
 
-            activityLogRepository.save(entity);
+            // Written in its own transaction: a failure here must not roll back the caller.
+            activityLogWriter.write(entity);
         } catch (Exception e) {
             log.warn("No se pudo registrar la actividad {} para el archivo {}: {}", action, fileId, e.getMessage());
         }
