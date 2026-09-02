@@ -149,20 +149,29 @@ public class FolderServiceImpl implements FolderService {
     public List<FolderEntity> listFolders(Long parentId, Long apiKeyId, String userId, String scope) {
         log.info("[FOLDER-SVC] listFolders scope={}, userId={}, apiKeyId={}, parentId={}",
                 scope, userId, apiKeyId, parentId);
-        if (parentId != null) {
-            folderRepository.findByIdAndApiKeyId(parentId, apiKeyId)
-                    .orElseThrow(() -> new FolderNotFoundException(parentId));
-            return folderRepository.findAllByApiKeyIdAndParentId(apiKeyId, parentId);
-        }
-        // "Compartidos" is authoritative: ALWAYS user_id IS NULL.
+        // "Compartidos" is authoritative and stays isolated per project: ALWAYS user_id IS NULL.
+        // Evaluated before the parent lookup so shared navigation keeps its existing behaviour.
         if ("shared".equalsIgnoreCase(scope)) {
+            if (parentId != null) {
+                folderRepository.findByIdAndApiKeyId(parentId, apiKeyId)
+                        .orElseThrow(() -> new FolderNotFoundException(parentId));
+                return folderRepository.findAllByApiKeyIdAndParentId(apiKeyId, parentId);
+            }
             return folderRepository.findAllByApiKeyIdAndParentIdIsNullAndUserIdIsNull(apiKeyId);
         }
-        // "Mis archivos" (private): strictly scoped to caller's cédula/userId.
+
         if (userId == null || userId.isBlank()) {
             return List.of();
         }
-        return folderRepository.findAllByApiKeyIdAndParentIdIsNullAndUserId(apiKeyId, userId.trim());
+        String owner = userId.trim();
+
+        // "Mis archivos" is decentralized: private folders follow the person, so navigation is
+        // keyed on the cédula alone. The parent is not validated against apiKeyId any more —
+        // doing so would reject a folder this same user created from another application.
+        if (parentId != null) {
+            return folderRepository.findAllByUserIdAndParentId(owner, parentId);
+        }
+        return folderRepository.findAllByUserIdAndParentIdIsNull(owner);
     }
 
     @Override

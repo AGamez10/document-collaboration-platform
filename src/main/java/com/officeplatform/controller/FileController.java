@@ -300,7 +300,10 @@ public class FileController {
             throw new com.officeplatform.exception.ShareAccessDeniedException("No tienes permisos de descarga para este archivo.");
         }
 
-        FileEntity fileEntity = fileService.getFile(id, principal.getApiKeyId());
+        // Identity is passed so a private file owned by this caller resolves even when it was
+        // created from another consumer application ("Mis archivos" is decentralized).
+        FileEntity fileEntity = fileService.getFile(id, principal.getApiKeyId(),
+                principal.resolveUserId(userId));
         InputStream inputStream = fileService.downloadFile(id, principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
 

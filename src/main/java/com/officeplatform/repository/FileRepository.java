@@ -59,6 +59,32 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
      */
     Optional<FileEntity> findByIdAndApiKeyId(Long id, Long apiKeyId);
 
+    // ── "Mis archivos" decentralized ────────────────────────────────────────────
+    // Private files follow the person, not the consumer application: the same cédula sees the
+    // same files from every project, so these queries deliberately omit apiKeyId.
+    // "Compartidos" keeps its per-project isolation and does NOT use them.
+
+    List<FileEntity> findAllByUserIdAndFolderIdIsNullAndDeletedAtIsNull(String userId);
+
+    List<FileEntity> findAllByUserIdAndFolderIdAndDeletedAtIsNull(String userId, Long folderId);
+
+    List<FileEntity> findAllByUserIdAndDeletedAtIsNull(String userId);
+
+    List<FileEntity> findAllByUserIdAndDeletedAtIsNotNull(String userId);
+
+    List<FileEntity> findAllByCreatedByUserIdAndDeletedAtIsNotNull(String createdByUserId);
+
+    List<FileEntity> findAllByCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNull(String createdByName);
+
+    /**
+     * Lookup by id that is not scoped to a project.
+     *
+     * <p>Needed because a decentralized "Mis archivos" listing can return a file created from a
+     * different consumer application; opening or downloading it must resolve. Callers are
+     * responsible for checking that the caller owns the file — see {@code FileServiceImpl}.
+     */
+    Optional<FileEntity> findByIdAndDeletedAtIsNull(Long id);
+
     /**
      * Trash listing driven by ownership rather than by scope. A shared file is stored with
      * user_id = null, so filtering the trash by user_id hides it from its own author while

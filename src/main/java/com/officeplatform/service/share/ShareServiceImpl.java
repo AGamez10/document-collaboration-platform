@@ -309,6 +309,15 @@ public class ShareServiceImpl implements ShareService {
             // restore/purge request resolve to a null permission and fail with 403.
             FileEntity file = fileRepository.findByIdAndApiKeyId(resourceId, apiKeyId).orElse(null);
             if (file == null) {
+                // "Mis archivos" is decentralized, so a private file this caller owns may live
+                // under another project. Only a file whose user_id is the caller resolves here,
+                // which never reaches a shared file (those are stored with user_id = null).
+                file = fileRepository.findById(resourceId)
+                        .filter(f -> f.getUserId() != null && userId != null
+                                && f.getUserId().trim().equalsIgnoreCase(userId.trim()))
+                        .orElse(null);
+            }
+            if (file == null) {
                 return null;
             }
             creatorUserId = file.getCreatedByUserId();
@@ -400,6 +409,14 @@ public class ShareServiceImpl implements ShareService {
 
         if (resourceType == ResourceType.FILE) {
             FileEntity file = fileRepository.findByIdAndApiKeyId(resourceId, apiKeyId).orElse(null);
+            if (file == null) {
+                // Decentralized "Mis archivos": a private file this caller owns can sit under
+                // another project. Restricted to user_id == caller, so shared files never match.
+                file = fileRepository.findById(resourceId)
+                        .filter(f -> f.getUserId() != null && userId != null
+                                && f.getUserId().trim().equalsIgnoreCase(userId.trim()))
+                        .orElse(null);
+            }
             if (file == null) {
                 return false;
             }

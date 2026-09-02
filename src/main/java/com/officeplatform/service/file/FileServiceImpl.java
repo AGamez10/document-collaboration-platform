@@ -90,16 +90,26 @@ public class FileServiceImpl implements FileService {
     public List<FileEntity> listFiles(Long apiKeyId, Long folderId, String userId, String scope) {
         log.info("[FILE-SVC] listFiles scope={}, userId={}, apiKeyId={}, folderId={}",
                 scope, userId, apiKeyId, folderId);
-        if (folderId != null) {
-            return fileRepository.findAllByApiKeyIdAndFolderIdAndDeletedAtIsNull(apiKeyId, folderId);
-        }
+        // "Compartidos" stays isolated per project and is evaluated first, so a caller without a
+        // cédula can never fall through into somebody else's private files.
         if ("shared".equalsIgnoreCase(scope)) {
+            if (folderId != null) {
+                return fileRepository.findAllByApiKeyIdAndFolderIdAndDeletedAtIsNull(apiKeyId, folderId);
+            }
             return fileRepository.findAllByApiKeyIdAndFolderIdIsNullAndUserIdIsNullAndDeletedAtIsNull(apiKeyId);
         }
+
         if (userId == null || userId.isBlank()) {
             return List.of();
         }
-        return fileRepository.findAllByApiKeyIdAndFolderIdIsNullAndUserIdAndDeletedAtIsNull(apiKeyId, userId.trim());
+        String owner = userId.trim();
+
+        // "Mis archivos" is decentralized: private files follow the person, so the listing is
+        // keyed on the cédula alone and the same files show up from every consumer application.
+        if (folderId != null) {
+            return fileRepository.findAllByUserIdAndFolderIdAndDeletedAtIsNull(owner, folderId);
+        }
+        return fileRepository.findAllByUserIdAndFolderIdIsNullAndDeletedAtIsNull(owner);
     }
 
     @Override
@@ -110,7 +120,8 @@ public class FileServiceImpl implements FileService {
         if (userId == null || userId.isBlank()) {
             return List.of();
         }
-        return fileRepository.findAllByApiKeyIdAndUserIdAndDeletedAtIsNull(apiKeyId, userId.trim());
+        // Decentralized, same rule as listFiles: "Recientes" over my own files from every project.
+        return fileRepository.findAllByUserIdAndDeletedAtIsNull(userId.trim());
     }
 
     /**
@@ -143,18 +154,20 @@ public class FileServiceImpl implements FileService {
 
         Map<Long, FileEntity> byId = new LinkedHashMap<>();
 
+        // Decentralized like "Mis archivos": the trash follows the person across projects, so
+        // apiKeyId is not part of the filter. Ownership still is — the queries below only ever
+        // match rows this user authored or owns.
         if (resolvedUserId != null) {
-            fileRepository.findAllByApiKeyIdAndCreatedByUserIdAndDeletedAtIsNotNull(apiKeyId, resolvedUserId)
+            fileRepository.findAllByCreatedByUserIdAndDeletedAtIsNotNull(resolvedUserId)
                     .forEach(file -> byId.put(file.getId(), file));
             // Legacy private rows: owned through user_id, created before created_by_user_id existed.
-            fileRepository.findAllByApiKeyIdAndUserIdAndDeletedAtIsNotNull(apiKeyId, resolvedUserId)
+            fileRepository.findAllByUserIdAndDeletedAtIsNotNull(resolvedUserId)
                     .forEach(file -> byId.putIfAbsent(file.getId(), file));
         }
 
         if (resolvedUserName != null) {
             fileRepository
-                    .findAllByApiKeyIdAndCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNull(
-                            apiKeyId, resolvedUserName)
+                    .findAllByCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNull(resolvedUserName)
                     .forEach(file -> byId.putIfAbsent(file.getId(), file));
         }
 
@@ -321,8 +334,38 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public FileEntity getFile(Long fileId, Long apiKeyId) {
-        return fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNull(fileId, apiKeyId)
-            .orElseThrow(() -> new FileNotFoundException(fileId));
+        return getFile(fileId, apiKeyId, null);
+    }
+
+    /**
+     * Resolves a file the caller is allowed to act on.
+     *
+     * <p>A file belonging to the caller's project resolves as it always did. On top of that, a
+     * <b>private</b> file whose {@code user_id} is the caller's cédula also resolves even when it
+     * was created from a different consumer application — otherwise a decentralized "Mis archivos"
+     * would list files that answer 404 on download, rename, move and open.
+     *
+     * <p>The second branch requires {@code user_id} to be non-null and to equal the caller, so it
+     * never reaches a shared file: those are stored with {@code user_id = null} and stay isolated
+     * inside their own project.
+     */
+    @Override
+    public FileEntity getFile(Long fileId, Long apiKeyId, String userId) {
+        FileEntity sameProject = fileRepository
+                .findByIdAndApiKeyIdAndDeletedAtIsNull(fileId, apiKeyId).orElse(null);
+        if (sameProject != null) {
+            return sameProject;
+        }
+
+        if (userId == null || userId.isBlank()) {
+            throw new FileNotFoundException(fileId);
+        }
+        String owner = userId.trim();
+
+        return fileRepository.findByIdAndDeletedAtIsNull(fileId)
+                .filter(file -> file.getUserId() != null
+                        && file.getUserId().trim().equalsIgnoreCase(owner))
+                .orElseThrow(() -> new FileNotFoundException(fileId));
     }
 
     @Override
@@ -344,7 +387,7 @@ public class FileServiceImpl implements FileService {
                     "El nombre del archivo no puede exceder " + MAX_FILE_NAME_LENGTH + " caracteres");
         }
 
-        FileEntity fileEntity = getFile(fileId, apiKeyId);
+        FileEntity fileEntity = getFile(fileId, apiKeyId, userId);
         String oldName = fileEntity.getOriginalFileName();
         fileEntity.setOriginalFileName(trimmedName);
         fileEntity.setUpdatedByName(userName);
@@ -359,7 +402,7 @@ public class FileServiceImpl implements FileService {
     @Override
     @Transactional
     public void softDeleteFile(Long fileId, Long apiKeyId, String userId, String userName) {
-        FileEntity fileEntity = getFile(fileId, apiKeyId);
+        FileEntity fileEntity = getFile(fileId, apiKeyId, userId);
         fileEntity.setDeletedAt(LocalDateTime.now());
         FileEntity saved = fileRepository.save(fileEntity);
         activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.DELETE,
@@ -393,7 +436,7 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public InputStream downloadFile(Long fileId, Long apiKeyId, String userId, String userName) {
-        FileEntity fileEntity = getFile(fileId, apiKeyId);
+        FileEntity fileEntity = getFile(fileId, apiKeyId, userId);
         activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.DOWNLOAD,
                 fileEntity.getId(), fileEntity.getOriginalFileName(), null, fileEntity.getFolderId());
         return storageService.retrieve(fileEntity.getObjectName());

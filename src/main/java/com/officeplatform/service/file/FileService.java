@@ -39,6 +39,13 @@ public interface FileService {
     FileEntity getFile(Long fileId, Long apiKeyId);
 
     /**
+     * Resolves a file the caller may act on: one in the caller's project, or a private file the
+     * caller owns even if it was created from another consumer application ("Mis archivos" is
+     * decentralized). Shared files stay isolated per project.
+     */
+    FileEntity getFile(Long fileId, Long apiKeyId, String userId);
+
+    /**
      * Lookup that also matches trashed files, so callers can authorize operations on the
      * trash (restore, purge) and still get a 404 — not a 403 — for a file that is simply gone.
      *

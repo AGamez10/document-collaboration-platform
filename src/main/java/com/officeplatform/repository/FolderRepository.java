@@ -30,6 +30,14 @@ public interface FolderRepository extends JpaRepository<FolderEntity, Long> {
 
     List<FolderEntity> findAllByApiKeyIdAndUserIdIsNullAndNameContainingIgnoreCase(Long apiKeyId, String term);
 
+    // ── "Mis archivos" decentralized ────────────────────────────────────────────
+    // Private folders follow the person, not the consumer application, so these queries omit
+    // apiKeyId on purpose. "Compartidos" keeps its per-project isolation and does NOT use them.
+
+    List<FolderEntity> findAllByUserIdAndParentIdIsNull(String userId);
+
+    List<FolderEntity> findAllByUserIdAndParentId(String userId, Long parentId);
+
     Optional<FolderEntity> findByIdAndApiKeyId(Long id, Long apiKeyId);
 
     Optional<FolderEntity> findByUuid(String uuid);

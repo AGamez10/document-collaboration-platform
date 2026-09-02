@@ -82,7 +82,9 @@ public class EditorServiceImpl implements EditorService {
 
     @Override
     public EditorConfigResponse getEditorConfig(Long fileId, ApiKeyPrincipal principal, String userId, String userName) {
-        FileEntity fileEntity = fileService.getFile(fileId, principal.getApiKeyId());
+        // Identity is passed so a private file this user owns opens from any consumer
+        // application ("Mis archivos" is decentralized). Shared files stay project-scoped.
+        FileEntity fileEntity = fileService.getFile(fileId, principal.getApiKeyId(), userId);
 
         com.officeplatform.entity.SharePermissionEntity.PermissionLevel level = shareService.getEffectivePermission(
                 com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, fileId, principal);
