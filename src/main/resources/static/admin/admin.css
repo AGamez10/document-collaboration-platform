@@ -749,6 +749,34 @@ body.not-authenticated .op-app {
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 .op-modal--confirm { max-width: 420px; text-align: center; }
+
+/* ── API key modal ──────────────────────────────────────────────────────────
+   Wider than the default modal because step 2 shows integration snippets, and
+   capped at 90vh so it never grows past the viewport. The body is a flex column
+   so the stepper and the title stay fixed while only the step content scrolls. */
+.op-modal--key {
+  max-width: 840px;
+  width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 24px 28px;
+}
+.op-modal--key .op-steps,
+.op-modal--key h3 { flex: 0 0 auto; }
+
+/* flex sizing is what actually constrains these: the header above them varies in
+   height (the stepper wraps on narrow screens), so a fixed offset alone would be
+   either too tight or too generous. max-height stays as a secondary cap. */
+#op-key-modal-form,
+#op-key-modal-result {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
+  max-height: calc(90vh - 120px);
+}
 .op-modal h3 { margin: 0 0 8px; font-size: 18px; font-weight: 800; letter-spacing: -0.3px; padding-right: 32px; }
 .op-modal__actions {
   display: flex;
@@ -810,7 +838,7 @@ body.not-authenticated .op-app {
 .op-key-reveal code { font-size: 13px; font-weight: 600; color: var(--op-color-primary); word-break: break-all; }
 
 .op-integration { margin-top: 18px; }
-.op-integration__hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.op-integration__hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 8px; }
 .op-integration__title { margin: 0; font-size: 14px; font-weight: 700; }
 .op-code-hd { display: flex; align-items: center; justify-content: space-between; margin: 12px 0 6px; }
 .op-code-lang { font-size: 11px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.6px; color: var(--admin-text-muted); }
@@ -819,8 +847,13 @@ body.not-authenticated .op-app {
   border: 1px solid var(--admin-border);
   border-radius: var(--op-radius-sm);
   padding: 14px;
-  font-size: 12px;
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
   line-height: 1.5;
+  /* Capped so a long backend snippet scrolls inside its own box instead of
+     stretching the modal past the viewport. */
+  max-height: 180px;
+  overflow-y: auto;
   overflow-x: auto;
   margin: 0;
 }
@@ -859,4 +892,11 @@ body.not-authenticated .op-app {
   .op-topbar { flex-direction: column; align-items: flex-start; gap: 12px; }
   .op-view__toolbar { flex-direction: column; align-items: stretch; }
   .op-filters { flex-direction: column; align-items: stretch; }
+
+  /* The key modal takes almost the whole viewport on a phone: less padding buys
+     room for the snippets, which keep scrolling inside their own box. */
+  .op-modal--key { padding: 16px; max-height: 94vh; }
+  #op-key-modal-form,
+  #op-key-modal-result { max-height: calc(94vh - 110px); }
+  .op-code-block { max-height: 150px; font-size: 11px; }
 }
