@@ -143,6 +143,19 @@ code { font-family: var(--op-font-mono); }
   background: var(--op-color-success);
   color: #fff;
 }
+/* Amber, between ghost and danger: restoring a backup is far-reaching but not
+   destructive — it never deletes work created after the snapshot. */
+.op-btn--warning {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.op-btn--warning:hover {
+  background: #f59e0b;
+  color: #fff;
+  border-color: #f59e0b;
+}
+
 .op-btn--danger {
   background: var(--op-color-danger-light);
   color: var(--op-color-danger);

@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.validation.Valid;
 
@@ -37,6 +38,7 @@ import com.officeplatform.dto.response.ApiKeyResponse;
 import com.officeplatform.dto.response.ApiResponse;
 import com.officeplatform.dto.response.BackupConfigResponse;
 import com.officeplatform.dto.response.BackupInfoResponse;
+import com.officeplatform.dto.response.BackupRestoreResponse;
 import com.officeplatform.dto.response.DashboardResponse;
 import com.officeplatform.dto.response.EditorSessionResponse;
 import com.officeplatform.dto.response.KnownUserResponse;
@@ -312,6 +314,61 @@ public class AdminController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
                 .contentType(MediaType.APPLICATION_OCTET_STREAM)
                 .body(resource);
+    }
+
+    /**
+     * Reinstates a package already stored in the backup directory.
+     *
+     * <p>Synchronises rather than wipes: rows already present are refreshed and missing ones are
+     * recreated, so restoring over a live database does not destroy work done since the snapshot.
+     * The response reports what was created versus updated, plus any binary that could not be
+     * returned to object storage.
+     */
+    @PostMapping("/backups/{fileName}/restore")
+    public ResponseEntity<ApiResponse<BackupRestoreResponse>> restoreBackup(@PathVariable String fileName) {
+        BackupRestoreResponse data = adminService.restoreBackup(fileName);
+
+        ApiResponse<BackupRestoreResponse> response = ApiResponse.<BackupRestoreResponse>builder()
+                .success(true)
+                .message("Copia de seguridad restaurada correctamente")
+                .data(data)
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    /** Stores an externally supplied package in the backup directory without restoring it. */
+    @PostMapping("/backups/upload")
+    public ResponseEntity<ApiResponse<BackupInfoResponse>> uploadBackup(
+            @RequestParam("file") MultipartFile file) throws java.io.IOException {
+
+        BackupInfoResponse data = adminService.storeUploadedBackup(
+                file.getOriginalFilename(), file.getInputStream());
+
+        ApiResponse<BackupInfoResponse> response = ApiResponse.<BackupInfoResponse>builder()
+                .success(true)
+                .message("Respaldo externo cargado correctamente")
+                .data(data)
+                .build();
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    /** Uploads and immediately restores an external package, for a server installed from scratch. */
+    @PostMapping("/backups/upload-and-restore")
+    public ResponseEntity<ApiResponse<BackupRestoreResponse>> uploadAndRestoreBackup(
+            @RequestParam("file") MultipartFile file) throws java.io.IOException {
+
+        BackupRestoreResponse data = adminService.restoreFromUpload(
+                file.getOriginalFilename(), file.getInputStream());
+
+        ApiResponse<BackupRestoreResponse> response = ApiResponse.<BackupRestoreResponse>builder()
+                .success(true)
+                .message("Respaldo externo restaurado correctamente")
+                .data(data)
+                .build();
+
+        return ResponseEntity.ok(response);
     }
 
     @DeleteMapping("/backups/{fileName}")

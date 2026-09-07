@@ -18,6 +18,7 @@ import com.officeplatform.exception.OnlyOfficeException;
 import com.officeplatform.onlyoffice.dto.OnlyOfficeCallbackRequest;
 import com.officeplatform.onlyoffice.dto.OnlyOfficeConfig;
 import com.officeplatform.onlyoffice.dto.OnlyOfficeDocument;
+import com.officeplatform.onlyoffice.dto.OnlyOfficeCustomization;
 import com.officeplatform.onlyoffice.dto.OnlyOfficeEditorConfig;
 import com.officeplatform.onlyoffice.dto.OnlyOfficePermissions;
 import com.officeplatform.onlyoffice.service.OnlyOfficeService;
@@ -122,7 +123,18 @@ public class EditorServiceImpl implements EditorService {
         Map<String, Object> user = Map.of("id", resolvedUserId, "name", resolvedUserName);
 
         String editorMode = canEdit ? "edit" : "view";
-        OnlyOfficeEditorConfig editorConfig = new OnlyOfficeEditorConfig(callbackUrl, "es", editorMode, user);
+        OnlyOfficeEditorConfig editorConfig = new OnlyOfficeEditorConfig(callbackUrl, "es", editorMode, user, null);
+
+        // Set before signing on purpose: Document Server only honours this section when it arrives
+        // inside the JWT payload, so it has to be part of the object handed to signConfig below.
+        editorConfig.setCustomization(OnlyOfficeCustomization.builder()
+                .macros(true)
+                .macrosMode("enable")
+                .plugins(true)
+                .autosave(true)
+                .forcesave(true)
+                .comments(true)
+                .build());
 
         OnlyOfficeConfig config = new OnlyOfficeConfig(document, resolveDocumentType(fileEntity.getExtension()), editorConfig, null);
         String token = onlyOfficeService.signConfig(config);

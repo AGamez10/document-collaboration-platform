@@ -63,6 +63,13 @@ public interface AdminService {
 
     void deleteBackup(String fileName);
 
+    com.officeplatform.dto.response.BackupRestoreResponse restoreBackup(String fileName);
+
+    com.officeplatform.dto.response.BackupRestoreResponse restoreFromUpload(
+            String originalName, java.io.InputStream zipStream);
+
+    BackupInfoResponse storeUploadedBackup(String originalName, java.io.InputStream zipStream);
+
     BackupConfigResponse getBackupConfig();
 
     BackupConfigResponse updateBackupConfig(BackupConfigRequest request);

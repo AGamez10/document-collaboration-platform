@@ -13,6 +13,9 @@ public interface ApiKeyRepository extends JpaRepository<ApiKeyEntity, Long> {
 
     Optional<ApiKeyEntity> findByApiKeyAndActiveTrue(String apiKey);
 
+    /** Lookup regardless of the active flag, used when restoring a backup. */
+    Optional<ApiKeyEntity> findByApiKey(String apiKey);
+
     long countByActiveTrue();
 
     List<ApiKeyEntity> findAllByActiveTrue();

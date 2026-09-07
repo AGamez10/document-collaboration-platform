@@ -658,4 +658,20 @@ public class AdminServiceImpl implements AdminService {
                 entity.getDeletedAt());
     }
 
+
+    @Override
+    public com.officeplatform.dto.response.BackupRestoreResponse restoreBackup(String fileName) {
+        return backupService.restoreBackup(fileName);
+    }
+
+    @Override
+    public com.officeplatform.dto.response.BackupRestoreResponse restoreFromUpload(
+            String originalName, java.io.InputStream zipStream) {
+        return backupService.restoreFromUpload(originalName, zipStream);
+    }
+
+    @Override
+    public BackupInfoResponse storeUploadedBackup(String originalName, java.io.InputStream zipStream) {
+        return backupService.storeUploadedBackup(originalName, zipStream);
+    }
 }

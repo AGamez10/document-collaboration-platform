@@ -25,4 +25,13 @@ public class BackupConfigRequest {
     @Max(value = 100, message = "No se pueden retener más de 100 backups")
     private Integer maxRetainedBackups;
 
+    /** Primary directory where packages are written. Blank keeps the current one. */
+    private String backupDirectory;
+
+    /** Secondary location (NAS / DataServer) each package is copied to. Blank disables the copy. */
+    private String replicationDirectory;
+
+    /** Whether every new package is replicated to {@code replicationDirectory}. */
+    private Boolean replicationEnabled;
+
 }

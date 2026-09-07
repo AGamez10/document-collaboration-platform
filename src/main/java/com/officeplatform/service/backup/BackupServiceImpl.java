@@ -8,6 +8,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.util.Locale;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -32,6 +34,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.officeplatform.dto.request.BackupConfigRequest;
 import com.officeplatform.dto.response.BackupConfigResponse;
 import com.officeplatform.dto.response.BackupInfoResponse;
+import com.officeplatform.dto.response.BackupRestoreResponse;
 import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
@@ -58,11 +61,14 @@ public class BackupServiceImpl implements BackupService {
     private final KnownUserRepository knownUserRepository;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
+    private final BackupRestoreService backupRestoreService;
 
     private String backupDirectoryPath;
     private boolean autoBackupEnabled;
     private int backupIntervalHours;
     private int maxRetainedBackups;
+    private String replicationDirectoryPath;
+    private boolean replicationEnabled;
     private LocalDateTime lastBackupTimestamp;
 
     public BackupServiceImpl(
@@ -74,7 +80,13 @@ public class BackupServiceImpl implements BackupService {
             @Value("${office-platform.backup.directory:backups}") String backupDirectoryPath,
             @Value("${office-platform.backup.auto-enabled:true}") boolean autoBackupEnabled,
             @Value("${office-platform.backup.interval-hours:24}") int backupIntervalHours,
-            @Value("${office-platform.backup.max-retained:10}") int maxRetainedBackups) {
+            @Value("${office-platform.backup.max-retained:10}") int maxRetainedBackups,
+            @Value("${office-platform.backup.replication-directory:}") String replicationDirectoryPath,
+            @Value("${office-platform.backup.replication-enabled:false}") boolean replicationEnabled,
+            BackupRestoreService backupRestoreService) {
+        this.replicationDirectoryPath = replicationDirectoryPath;
+        this.replicationEnabled = replicationEnabled;
+        this.backupRestoreService = backupRestoreService;
 
         this.fileRepository = fileRepository;
         this.folderRepository = folderRepository;
@@ -215,6 +227,7 @@ public class BackupServiceImpl implements BackupService {
         }
 
         this.lastBackupTimestamp = now;
+        replicateToSecondary(zipPath, zipName);
         enforceRetentionPolicy();
 
         File createdFile = zipPath.toFile();
@@ -269,6 +282,9 @@ public class BackupServiceImpl implements BackupService {
                 .intervalHours(backupIntervalHours)
                 .maxRetainedBackups(maxRetainedBackups)
                 .backupDirectory(dir.toString())
+                .replicationDirectory(replicationDirectoryPath)
+                .replicationEnabled(replicationEnabled)
+                .replicationReachable(isReplicationReachable())
                 .diskFreeSpaceBytes(freeBytes)
                 .formattedDiskFreeSpace(formatBytes(freeBytes))
                 .diskTotalSpaceBytes(totalBytes)
@@ -277,13 +293,29 @@ public class BackupServiceImpl implements BackupService {
     }
 
     @Override
-    public BackupConfigResponse updateConfig(BackupConfigRequest request) {
+    public synchronized BackupConfigResponse updateConfig(BackupConfigRequest request) {
         this.autoBackupEnabled = request.getEnabled();
         this.backupIntervalHours = request.getIntervalHours();
         this.maxRetainedBackups = request.getMaxRetainedBackups();
 
-        log.info("Configuración de backups actualizada: habilitado={}, intervalo={}h, retención={}",
-                autoBackupEnabled, backupIntervalHours, maxRetainedBackups);
+        // Paths are applied hot so an operator can move the destination without a redeploy.
+        // A blank value means "leave as is" rather than "clear": clearing the primary directory
+        // would silently send the next package somewhere unexpected.
+        if (request.getBackupDirectory() != null && !request.getBackupDirectory().isBlank()) {
+            this.backupDirectoryPath = request.getBackupDirectory().trim();
+            initDirectory();
+        }
+        if (request.getReplicationDirectory() != null) {
+            this.replicationDirectoryPath = request.getReplicationDirectory().trim();
+        }
+        if (request.getReplicationEnabled() != null) {
+            this.replicationEnabled = request.getReplicationEnabled();
+        }
+
+        log.info("Configuración de backups actualizada: habilitado={}, intervalo={}h, retención={}, "
+                        + "directorio={}, replicación={} hacia '{}'",
+                autoBackupEnabled, backupIntervalHours, maxRetainedBackups,
+                backupDirectoryPath, replicationEnabled, replicationDirectoryPath);
 
         enforceRetentionPolicy();
         return getConfig();
@@ -357,4 +389,92 @@ public class BackupServiceImpl implements BackupService {
         return String.format("%.2f %s", size, units[digitGroups]);
     }
 
+
+    /**
+     * Copies a freshly written package to the secondary location (NAS / DataServer).
+     *
+     * <p>Failures are logged and swallowed on purpose. The local package is already on disk and
+     * valid; if the network share is down, losing the replica is bad but destroying the backup run
+     * because of it would be worse — the operator would end up with neither copy.
+     */
+    private void replicateToSecondary(Path sourceZip, String zipName) {
+        if (!replicationEnabled || replicationDirectoryPath == null || replicationDirectoryPath.isBlank()) {
+            return;
+        }
+        try {
+            Path target = Paths.get(replicationDirectoryPath.trim());
+            Files.createDirectories(target);
+            Path destination = target.resolve(zipName);
+            Files.copy(sourceZip, destination, StandardCopyOption.REPLACE_EXISTING);
+            log.info("Copia de seguridad replicada en '{}'", destination);
+        } catch (IOException | RuntimeException e) {
+            log.warn("No se pudo replicar la copia '{}' hacia '{}': {}. "
+                            + "El respaldo local se conservó intacto.",
+                    zipName, replicationDirectoryPath, e.getMessage());
+        }
+    }
+
+    /** Whether the secondary location can be written to right now, for display in the console. */
+    private boolean isReplicationReachable() {
+        if (replicationDirectoryPath == null || replicationDirectoryPath.isBlank()) {
+            return false;
+        }
+        try {
+            Path target = Paths.get(replicationDirectoryPath.trim());
+            return Files.isDirectory(target) && Files.isWritable(target);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    @Override
+    public BackupRestoreResponse restoreBackup(String fileName) {
+        validateFileName(fileName);
+        Path zipPath = getResolvedDirectory().resolve(fileName).normalize();
+        return backupRestoreService.restore(zipPath, fileName);
+    }
+
+    @Override
+    public BackupRestoreResponse restoreFromUpload(String originalName, InputStream zipStream) {
+        String label = (originalName == null || originalName.isBlank()) ? "respaldo-externo.zip" : originalName;
+        return backupRestoreService.restore(zipStream, label);
+    }
+
+    @Override
+    public BackupInfoResponse storeUploadedBackup(String originalName, InputStream zipStream) {
+        String safeName = sanitizeUploadName(originalName);
+        Path destination = getResolvedDirectory().resolve(safeName).normalize();
+        try {
+            Files.copy(zipStream, destination, StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new StorageException("No se pudo guardar el respaldo subido: " + e.getMessage());
+        }
+        File stored = destination.toFile();
+        log.info("Respaldo externo almacenado como '{}'", safeName);
+        return BackupInfoResponse.builder()
+                .fileName(safeName)
+                .sizeBytes(stored.length())
+                .formattedSize(formatBytes(stored.length()))
+                .type("MANUAL")
+                .createdAt(LocalDateTime.now())
+                .build();
+    }
+
+    /**
+     * Reduces an uploaded name to a safe file name inside the backup directory: no path
+     * separators, no traversal, and always a .zip extension.
+     */
+    private String sanitizeUploadName(String originalName) {
+        String base = (originalName == null || originalName.isBlank()) ? "respaldo-externo" : originalName;
+        base = base.replace("\\", "/");
+        base = base.substring(base.lastIndexOf('/') + 1);
+        base = base.replaceAll("[^A-Za-z0-9._-]", "_");
+        if (base.isBlank() || base.startsWith(".")) {
+            base = "respaldo-externo";
+        }
+        if (!base.toLowerCase(Locale.ROOT).endsWith(".zip")) {
+            base = base + ".zip";
+        }
+        return "backup_externo_" + LocalDateTime.now().format(BACKUP_FILE_DATE_FORMAT) + "_" + base;
+    }
 }

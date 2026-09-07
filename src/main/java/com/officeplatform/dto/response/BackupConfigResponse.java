@@ -18,6 +18,10 @@ public class BackupConfigResponse {
     private int maxRetainedBackups;
 
     private String backupDirectory;
+    private String replicationDirectory;
+    private boolean replicationEnabled;
+    /** Whether the secondary location is reachable and writable right now. */
+    private boolean replicationReachable;
 
     private long diskFreeSpaceBytes;
 

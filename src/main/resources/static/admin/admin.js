@@ -58,6 +58,12 @@
     cfgBackupEnabled: document.getElementById('op-cfg-backup-enabled'),
     cfgBackupInterval: document.getElementById('op-cfg-backup-interval'),
     cfgBackupMax: document.getElementById('op-cfg-backup-max'),
+    cfgBackupDir: document.getElementById('op-cfg-backup-dir'),
+    cfgBackupReplicationDir: document.getElementById('op-cfg-backup-replication-dir'),
+    cfgBackupReplicationEnabled: document.getElementById('op-cfg-backup-replication-enabled'),
+    cfgReplicationStatus: document.getElementById('op-cfg-replication-status'),
+    uploadBackupBtn: document.getElementById('op-upload-backup-btn'),
+    uploadBackupInput: document.getElementById('op-upload-backup-input'),
 
     // Users
     usersTbody: document.getElementById('op-users-tbody'),
@@ -732,6 +738,73 @@
   });
 
   // ── 3. COPIAS DE SEGURIDAD (BACKUPS) ──────────────────────────────────
+
+  /**
+   * Styled confirmation dialog, built on the modal classes the panel already uses.
+   *
+   * Restoring a backup is the most far-reaching action in this console, so it gets a real dialog
+   * rather than window.confirm: the warning needs room to explain what will and will not change.
+   */
+  function showConfirm(opts) {
+    const overlay = document.createElement('div');
+    overlay.className = 'op-modal-overlay';
+    overlay.innerHTML =
+      '<div class="op-modal op-modal--confirm">' +
+        '<div class="op-confirm__icon">' +
+          '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+          '<path d="m10.29 3.86-8.49 14.7A1 1 0 0 0 2.67 20h16.66a1 1 0 0 0 .87-1.5L11.71 3.86a1 1 0 0 0-1.72 0z"/>' +
+          '<line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>' +
+        '</div>' +
+        '<h3></h3>' +
+        '<p class="op-confirm__desc"></p>' +
+        '<div class="op-modal__actions">' +
+          '<button type="button" class="op-btn op-btn--ghost" data-confirm-cancel>Cancelar</button>' +
+          '<button type="button" class="op-btn op-btn--danger" data-confirm-ok></button>' +
+        '</div>' +
+      '</div>';
+    overlay.querySelector('h3').textContent = opts.title || 'Confirmar';
+    overlay.querySelector('.op-confirm__desc').textContent = opts.message || '';
+    const okBtn = overlay.querySelector('[data-confirm-ok]');
+    okBtn.textContent = opts.confirmLabel || 'Continuar';
+
+    function close() {
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+    }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+
+    overlay.querySelector('[data-confirm-cancel]').addEventListener('click', close);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', onKey);
+    okBtn.addEventListener('click', function () {
+      close();
+      if (typeof opts.onConfirm === 'function') opts.onConfirm();
+    });
+
+    document.body.appendChild(overlay);
+    okBtn.focus();
+  }
+
+  /** Runs a restore and reports the per-table outcome the backend returns. */
+  async function runRestore(fileName) {
+    showToast('Restaurando "' + fileName + '"... esto puede tardar según el tamaño del paquete.');
+    try {
+      const body = await api('/api/admin/backups/' + encodeURIComponent(fileName) + '/restore', { method: 'POST' });
+      const d = body.data || {};
+      const created = (d.filesCreated || 0) + (d.foldersCreated || 0);
+      const updated = (d.filesUpdated || 0) + (d.foldersUpdated || 0);
+      let msg = 'Restauración completada: ' + created + ' creados, ' + updated + ' actualizados, ' +
+                (d.binariesRestored || 0) + ' binarios.';
+      if (d.warnings && d.warnings.length) {
+        msg += ' ' + d.warnings.length + ' advertencia(s) — revisa los logs.';
+      }
+      showToast(msg);
+      loadBackups();
+    } catch (err) {
+      showToast('No se pudo restaurar: ' + err.message, true);
+    }
+  }
+
   async function loadBackups() {
     loadBackupConfig();
     els.backupsEmpty.hidden = true;
@@ -756,11 +829,26 @@
           '<td style="text-align:right;">' +
             '<div style="display:flex;gap:6px;justify-content:flex-end;">' +
               '<a href="/api/admin/backups/' + encodeURIComponent(b.fileName) + '/download" class="op-btn op-btn--sm op-btn--ghost" download>Descargar ZIP</a>' +
+              '<button type="button" class="op-btn op-btn--sm op-btn--warning" data-restore-backup="' + escapeHtml(b.fileName) + '">Restaurar</button>' +
               '<button type="button" class="op-btn op-btn--sm op-btn--danger" data-delete-backup="' + escapeHtml(b.fileName) + '">Eliminar</button>' +
             '</div>' +
           '</td>' +
           '</tr>';
       }).join('');
+
+      els.backupsTbody.querySelectorAll('[data-restore-backup]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const fn = btn.dataset.restoreBackup;
+          showConfirm({
+            title: 'Restaurar copia de seguridad',
+            message: '¡Atención! Restaurar este respaldo reintegrará los metadatos y binarios al ' +
+                     'estado de esa fecha. Los registros que ya existan se actualizarán y los que ' +
+                     'falten se recrearán; nada de lo creado después se elimina. ¿Deseas continuar?',
+            confirmLabel: 'Restaurar ahora',
+            onConfirm: function () { runRestore(fn); },
+          });
+        });
+      });
 
       els.backupsTbody.querySelectorAll('[data-delete-backup]').forEach(function (btn) {
         btn.addEventListener('click', async function () {
@@ -800,6 +888,20 @@
       els.cfgBackupEnabled.checked = cfg.enabled;
       els.cfgBackupInterval.value = cfg.intervalHours;
       els.cfgBackupMax.value = cfg.maxRetainedBackups;
+      els.cfgBackupDir.value = cfg.backupDirectory || '';
+      els.cfgBackupReplicationDir.value = cfg.replicationDirectory || '';
+      els.cfgBackupReplicationEnabled.checked = !!cfg.replicationEnabled;
+
+      // Reachability is reported by the backend so the operator sees a broken network
+      // share here instead of discovering it when a backup silently fails to replicate.
+      if (cfg.replicationDirectory) {
+        els.cfgReplicationStatus.textContent = cfg.replicationReachable
+          ? 'Ruta accesible y escribible.'
+          : 'ATENCION: la ruta no responde o no permite escritura. El respaldo local se conserva igual.';
+      } else {
+        els.cfgReplicationStatus.textContent =
+          'Segunda copia fuera del servidor, por si el disco local falla.';
+      }
     } catch (err) {}
   }
 
@@ -819,6 +921,47 @@
     }
   });
 
+  els.uploadBackupBtn.addEventListener('click', function () {
+    els.uploadBackupInput.click();
+  });
+
+  els.uploadBackupInput.addEventListener('change', function () {
+    const file = els.uploadBackupInput.files && els.uploadBackupInput.files[0];
+    if (!file) return;
+    // Reset immediately so picking the same file twice fires the event again.
+    els.uploadBackupInput.value = '';
+    showConfirm({
+      title: 'Subir y restaurar respaldo externo',
+      message: '¡Atención! Se cargará "' + file.name + '" y se reintegrarán sus metadatos y ' +
+               'binarios. Los registros existentes se actualizarán y los faltantes se recrearán. ' +
+               '¿Deseas continuar?',
+      confirmLabel: 'Subir y restaurar',
+      onConfirm: function () { uploadAndRestore(file); },
+    });
+  });
+
+  async function uploadAndRestore(file) {
+    showToast('Subiendo "' + file.name + '"...');
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      // No Content-Type header on purpose: the browser sets the multipart boundary itself.
+      const res = await fetch('/api/admin/backups/upload-and-restore', {
+        method: 'POST',
+        headers: { Authorization: state.authHeader },
+        body: form,
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error((body && body.message) || ('Error del servidor (' + res.status + ')'));
+      const d = body.data || {};
+      showToast('Respaldo externo restaurado: ' + ((d.filesCreated || 0) + (d.filesUpdated || 0)) +
+                ' archivos, ' + (d.binariesRestored || 0) + ' binarios.');
+      loadBackups();
+    } catch (err) {
+      showToast('No se pudo restaurar el respaldo externo: ' + err.message, true);
+    }
+  }
+
   els.backupConfigBtn.addEventListener('click', function () {
     els.backupModal.hidden = false;
   });
@@ -830,6 +973,9 @@
       enabled: els.cfgBackupEnabled.checked,
       intervalHours: parseInt(els.cfgBackupInterval.value, 10) || 24,
       maxRetainedBackups: parseInt(els.cfgBackupMax.value, 10) || 10,
+      backupDirectory: els.cfgBackupDir.value.trim(),
+      replicationDirectory: els.cfgBackupReplicationDir.value.trim(),
+      replicationEnabled: els.cfgBackupReplicationEnabled.checked,
     };
     try {
       await api('/api/admin/backups/config', {

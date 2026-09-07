@@ -21,4 +21,14 @@ public interface BackupService {
 
     BackupConfigResponse updateConfig(BackupConfigRequest request);
 
+    /** Restores a package already stored in the backup directory. */
+    com.officeplatform.dto.response.BackupRestoreResponse restoreBackup(String fileName);
+
+    /** Restores a package supplied by the caller without storing it first. */
+    com.officeplatform.dto.response.BackupRestoreResponse restoreFromUpload(
+            String originalName, java.io.InputStream zipStream);
+
+    /** Stores an externally supplied package in the backup directory. */
+    BackupInfoResponse storeUploadedBackup(String originalName, java.io.InputStream zipStream);
+
 }

@@ -420,9 +420,7 @@ public class FileServiceImpl implements FileService {
 
     @Override
     public FileEntity getFileIncludingTrashed(Long fileId, Long apiKeyId) {
-        return fileRepository.findByIdAndApiKeyId(fileId, apiKeyId)
-            .or(() -> fileRepository.findById(fileId))
-            .orElseThrow(() -> new FileNotFoundException(fileId));
+        return getFileIncludingTrashed(fileId, apiKeyId, null);
     }
 
     /**

@@ -17,4 +17,10 @@ public class OnlyOfficeEditorConfig {
 
     private Object user;
 
+    /**
+     * Editor behaviour Document Server applies only when asked: macros and plugins are off by
+     * default, so the Macros toolbar entry never appeared without this section.
+     */
+    private OnlyOfficeCustomization customization;
+
 }
