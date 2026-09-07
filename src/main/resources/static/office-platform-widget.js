@@ -34,6 +34,12 @@
   const API_KEY = scriptTag.getAttribute('data-api-key') || '';
   const CONTAINER = scriptTag.getAttribute('data-container');
   const SERVER = (scriptTag.getAttribute('data-server') || '').replace(/\/$/, '');
+
+  // Port and address of the OnlyOffice Document Server as the browser reaches it. Only used when
+  // the backend sends no usable value: the script tag for the editor API must always be an
+  // absolute URL, never a path relative to the consuming application.
+  const OO_DEFAULT_PORT = '8081';
+  const OO_FALLBACK_URL = 'http://localhost:' + OO_DEFAULT_PORT;
   const USER_ID = scriptTag.getAttribute('data-user-id') || '';
   const USER_NAME = scriptTag.getAttribute('data-user-name') || '';
   const WIDGET_TOKEN = scriptTag.getAttribute('data-token') || '';
@@ -1734,24 +1740,44 @@
       // cfg.documentServer is the browser-reachable public URL of the OnlyOffice document server
       // (e.g. http://localhost:8081). The internal Docker hostname is never sent to the browser.
       let docServer = (cfg.documentServer || '').trim();
+
+      // Defence in depth. If the backend sends nothing usable, an empty value here would build
+      // the relative path '/web-apps/...', which the browser resolves against the CONSUMING
+      // application's own host — a 404 on every open. A relative path is never acceptable for
+      // this script: it must be an absolute URL pointing at Document Server.
+      if (!/^https?:\/\//i.test(docServer)) {
+        let base = '';
+        try {
+          // Same host as the platform, on the Document Server port.
+          const platform = new URL(SERVER || window.location.origin, window.location.href);
+          platform.port = OO_DEFAULT_PORT;
+          platform.pathname = '';
+          platform.search = '';
+          platform.hash = '';
+          base = platform.toString().replace(/\/$/, '');
+        } catch (_) {}
+        docServer = base || OO_FALLBACK_URL;
+      }
+
       try {
-        if (docServer) {
-          const dsUrl = new URL(docServer);
-          if (dsUrl.hostname === 'localhost' || dsUrl.hostname === '127.0.0.1') {
-            let refHost = '';
-            if (SERVER_URL) {
-              try { refHost = new URL(SERVER_URL, window.location.href).hostname; } catch (_) {}
-            }
-            if (!refHost && window.location && window.location.hostname) {
-              refHost = window.location.hostname;
-            }
-            if (refHost && refHost !== 'localhost' && refHost !== '127.0.0.1') {
-              dsUrl.hostname = refHost;
-              docServer = dsUrl.toString().replace(/\/$/, '');
-            }
+        const dsUrl = new URL(docServer);
+        if (dsUrl.hostname === 'localhost' || dsUrl.hostname === '127.0.0.1') {
+          // A loopback address is meaningless to a browser on another machine: rewrite it to the
+          // host this page was actually served from.
+          let refHost = '';
+          if (SERVER) {
+            try { refHost = new URL(SERVER, window.location.href).hostname; } catch (_) {}
+          }
+          if (!refHost && window.location && window.location.hostname) {
+            refHost = window.location.hostname;
+          }
+          if (refHost && refHost !== 'localhost' && refHost !== '127.0.0.1') {
+            dsUrl.hostname = refHost;
+            docServer = dsUrl.toString().replace(/\/$/, '');
           }
         }
       } catch (_) {}
+
       const scriptSrc = docServer.replace(/\/$/, '') + '/web-apps/apps/api/documents/api.js';
 
       const script = document.createElement('script');

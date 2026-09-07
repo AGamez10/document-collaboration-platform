@@ -41,6 +41,16 @@ public class EditorServiceImpl implements EditorService {
     private static final int FORCE_SAVE_STATUS = 6;
     private static final int MAX_USER_FIELD_LENGTH = 100;
 
+    /**
+     * Used when no public URL for Document Server is configured.
+     *
+     * <p>A blank value used to reach the browser unchanged, and the widget then built a relative
+     * {@code /web-apps/...} path that resolved against the consuming application's own host —
+     * a 404 on every attempt to open a document. Any value here is better than an empty one:
+     * a wrong host is visible and fixable, an empty one silently targets the wrong server.
+     */
+    private static final String DEFAULT_DOCUMENT_SERVER_PUBLIC_URL = "http://localhost:8081";
+
     private final FileService fileService;
     private final FileRepository fileRepository;
     private final StorageService storageService;
@@ -76,9 +86,21 @@ public class EditorServiceImpl implements EditorService {
         this.restTemplate = restTemplate;
         this.shareService = shareService;
         this.documentServerUrl = documentServerUrl;
-        this.documentServerPublicUrl = documentServerPublicUrl;
+        // Sanitised at construction so every consumer of this field gets a usable URL. The
+        // property has a default, but Docker Compose exports the variable as an empty string,
+        // which counts as set and therefore bypasses that default.
+        this.documentServerPublicUrl = normalizePublicUrl(documentServerPublicUrl);
         this.callbackUrl = callbackUrl;
         this.appInternalUrl = appInternalUrl;
+    }
+
+    /** Trims the configured URL and substitutes the fallback when it is missing or blank. */
+    private static String normalizePublicUrl(String configured) {
+        if (configured == null || configured.isBlank()) {
+            return DEFAULT_DOCUMENT_SERVER_PUBLIC_URL;
+        }
+        String trimmed = configured.trim();
+        return trimmed.replaceAll("/+$", "");
     }
 
     @Override
