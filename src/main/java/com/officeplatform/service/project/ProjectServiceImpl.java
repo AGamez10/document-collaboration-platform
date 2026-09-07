@@ -34,7 +34,8 @@ public class ProjectServiceImpl implements ProjectService {
     private List<ProjectResponse> toResponses(List<ApiKeyEntity> keys, Long excludeApiKeyId) {
         return keys.stream()
                 .filter(key -> !Objects.equals(key.getId(), excludeApiKeyId))
-                .map(key -> new ProjectResponse(key.getId(), key.getName()))
+                .map(key -> new ProjectResponse(key.getId(),
+                        (key.getName() != null && !key.getName().isBlank()) ? key.getName().trim() : "Proyecto #" + key.getId()))
                 .toList();
     }
 

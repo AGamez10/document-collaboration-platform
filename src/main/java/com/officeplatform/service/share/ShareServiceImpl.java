@@ -298,6 +298,7 @@ public class ShareServiceImpl implements ShareService {
         String userId = principal.resolveUserId(null);
         boolean admin = isProjectAdmin(apiKeyId, userId);
 
+        Long resourceApiKeyId = null;
         String creatorUserId = null;
         String creatorName = null;
         Long parentFolderId = null;
@@ -307,36 +308,31 @@ public class ShareServiceImpl implements ShareService {
             // Includes trashed files on purpose: restore and purge act on files whose
             // deletedAt is not null, so restricting this lookup to live files made every
             // restore/purge request resolve to a null permission and fail with 403.
-            FileEntity file = fileRepository.findByIdAndApiKeyId(resourceId, apiKeyId).orElse(null);
-            if (file == null) {
-                // "Mis archivos" is decentralized, so a private file this caller owns may live
-                // under another project. Only a file whose user_id is the caller resolves here,
-                // which never reaches a shared file (those are stored with user_id = null).
-                file = fileRepository.findById(resourceId)
-                        .filter(f -> f.getUserId() != null && userId != null
-                                && f.getUserId().trim().equalsIgnoreCase(userId.trim()))
-                        .orElse(null);
-            }
+            FileEntity file = fileRepository.findById(resourceId).orElse(null);
             if (file == null) {
                 return null;
             }
+            resourceApiKeyId = file.getApiKeyId();
             creatorUserId = file.getCreatedByUserId();
             creatorName = file.getCreatedByName();
             parentFolderId = file.getFolderId();
             resourceUserId = file.getUserId();
         } else {
-            FolderEntity folder = folderRepository.findByIdAndApiKeyId(resourceId, apiKeyId).orElse(null);
+            FolderEntity folder = folderRepository.findById(resourceId).orElse(null);
             if (folder == null) {
                 return null;
             }
+            resourceApiKeyId = folder.getApiKeyId();
             creatorUserId = folder.getCreatedByUserId();
             creatorName = folder.getCreatedByName();
             parentFolderId = folder.getParentId();
             resourceUserId = folder.getUserId();
         }
 
-        // Project admins always have full EDIT permissions
-        if (admin) {
+        boolean sameProject = Objects.equals(resourceApiKeyId, apiKeyId);
+
+        // Project admins have full EDIT permissions on resources in their own project
+        if (admin && sameProject) {
             return SharePermissionEntity.PermissionLevel.EDIT;
         }
 
@@ -350,9 +346,9 @@ public class ShareServiceImpl implements ShareService {
             return SharePermissionEntity.PermissionLevel.EDIT;
         }
 
-        // Check direct permissions on the resource itself (regardless of private/public scope)
+        // Check direct permissions on the resource itself across all projects
         List<SharePermissionEntity> perms = sharePermissionRepository
-                .findAllByResourceTypeAndResourceIdAndSourceApiKeyId(resourceType, resourceId, apiKeyId);
+                .findAllByResourceTypeAndResourceId(resourceType, resourceId);
         
         SharePermissionEntity.PermissionLevel directLvl = getMatchingPermission(perms, userId, apiKeyId);
         if (directLvl != null) {
@@ -364,12 +360,11 @@ public class ShareServiceImpl implements ShareService {
             return getEffectivePermission(ResourceType.FOLDER, parentFolderId, principal);
         }
 
-        // If it's a public space item (resourceUserId == null) with no permissions set, default is EDIT
-        if (resourceUserId == null && perms.isEmpty()) {
+        // If it's a public space item (resourceUserId == null) of the same project with no permissions set, default is EDIT
+        if (resourceUserId == null && sameProject && perms.isEmpty()) {
             return SharePermissionEntity.PermissionLevel.EDIT;
         }
 
-        // Otherwise: if it's a private item of someone else with no matching share permissions, access is denied
         return null;
     }
 
@@ -397,8 +392,24 @@ public class ShareServiceImpl implements ShareService {
 
     @Override
     public boolean isOwnerOrAdmin(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {
+        return isOwnerOrAdmin(resourceType, resourceId, principal, null, null);
+    }
+
+    /**
+     * Ownership check that accepts the identity carried by the request.
+     *
+     * <p>A caller authenticated with the classic {@code X-Api-Key} header has no cédula on the
+     * principal, and passes it as request parameters instead. Resolving identity only from the
+     * principal made every such call look anonymous, so the legitimate author of a file was denied
+     * with "no eres el propietario". The explicit values take precedence, exactly as
+     * {@code softDeleteFile} and the other service calls already do.
+     */
+    @Override
+    public boolean isOwnerOrAdmin(ResourceType resourceType, Long resourceId,
+                                  ApiKeyPrincipal principal, String requestUserId, String requestUserName) {
         Long apiKeyId = principal.getApiKeyId();
-        String userId = normalizeIdentity(principal.resolveUserId(null));
+        String userId = normalizeIdentity(principal.resolveUserId(requestUserId));
+        String userName = normalizeIdentity(principal.resolveUserName(requestUserName));
 
         if (isProjectAdmin(apiKeyId, userId)) {
             return true;
@@ -425,13 +436,22 @@ public class ShareServiceImpl implements ShareService {
         } else {
             FolderEntity folder = folderRepository.findByIdAndApiKeyId(resourceId, apiKeyId).orElse(null);
             if (folder == null) {
+                // Decentralized "Mis archivos": a private folder this caller owns can sit under
+                // another project. Restricted to user_id == caller, so shared folders never match.
+                final String owner = userId;
+                folder = folderRepository.findById(resourceId)
+                        .filter(f -> f.getUserId() != null && owner != null
+                                && f.getUserId().trim().equalsIgnoreCase(owner))
+                        .orElse(null);
+            }
+            if (folder == null) {
                 return false;
             }
             creatorUserId = folder.getCreatedByUserId();
             creatorName = folder.getCreatedByName();
         }
 
-        return isCreator(creatorUserId, creatorName, principal);
+        return isCreator(creatorUserId, creatorName, userId, userName);
     }
 
     private void assertCanManage(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {
@@ -448,7 +468,17 @@ public class ShareServiceImpl implements ShareService {
      * back to the creator's display name (createdByName == JWT name).
      */
     private boolean isCreator(String creatorUserId, String creatorName, ApiKeyPrincipal principal) {
-        String viewerUserId = normalizeIdentity(principal.resolveUserId(null));
+        return isCreator(creatorUserId, creatorName,
+                normalizeIdentity(principal.resolveUserId(null)),
+                normalizeIdentity(principal.resolveUserName(null)));
+    }
+
+    /**
+     * Same rule as above but on identity already resolved by the caller, so a request that carries
+     * its cédula as a parameter is judged on that value instead of on an empty principal.
+     */
+    private boolean isCreator(String creatorUserId, String creatorName,
+                              String viewerUserId, String viewerName) {
         String storedUserId = normalizeIdentity(creatorUserId);
 
         // Strong signal: both sides carry an identifier, so it decides in both directions.
@@ -461,7 +491,6 @@ public class ShareServiceImpl implements ShareService {
         // Fallback, reached only when one of the two identifiers is missing: rows created before
         // created_by_user_id existed, and callers that authenticated without an identifier.
         // Comparing on the display name is the best signal available for those.
-        String viewerName = normalizeIdentity(principal.resolveUserName(null));
         String storedName = normalizeIdentity(creatorName);
         return storedName != null && viewerName != null && storedName.equalsIgnoreCase(viewerName);
     }

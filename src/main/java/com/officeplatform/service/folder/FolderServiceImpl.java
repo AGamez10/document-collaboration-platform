@@ -131,6 +131,13 @@ public class FolderServiceImpl implements FolderService {
             List<FileEntity> files = fileRepository.findAllByApiKeyIdAndFolderIdAndDeletedAtIsNull(apiKeyId, node.getId());
             for (FileEntity file : files) {
                 file.setDeletedAt(LocalDateTime.now());
+                // Detached from the folder on purpose. Folders are removed from the database
+                // below, so a file keeping its folder_id would point at a row that no longer
+                // exists: restoring it later left it invisible — absent from the root listing
+                // (folder_id is not null) and from every folder listing (its folder is gone).
+                // Clearing the reference makes a restored file reappear at the root of the space
+                // it belonged to, which is the only location that still exists.
+                file.setFolderId(null);
             }
             fileRepository.saveAll(files);
             filesMoved += files.size();
@@ -153,9 +160,10 @@ public class FolderServiceImpl implements FolderService {
         // Evaluated before the parent lookup so shared navigation keeps its existing behaviour.
         if ("shared".equalsIgnoreCase(scope)) {
             if (parentId != null) {
-                folderRepository.findByIdAndApiKeyId(parentId, apiKeyId)
+                FolderEntity parent = folderRepository.findById(parentId)
                         .orElseThrow(() -> new FolderNotFoundException(parentId));
-                return folderRepository.findAllByApiKeyIdAndParentId(apiKeyId, parentId);
+                Long targetApiKey = parent.getApiKeyId();
+                return folderRepository.findAllByApiKeyIdAndParentId(targetApiKey, parentId);
             }
             return folderRepository.findAllByApiKeyIdAndParentIdIsNullAndUserIdIsNull(apiKeyId);
         }
@@ -219,7 +227,7 @@ public class FolderServiceImpl implements FolderService {
 
     @Override
     public FolderEntity getFolder(Long folderId, Long apiKeyId) {
-        return folderRepository.findByIdAndApiKeyId(folderId, apiKeyId)
+        return folderRepository.findById(folderId)
                 .orElseThrow(() -> new FolderNotFoundException(folderId));
     }
 

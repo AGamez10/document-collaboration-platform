@@ -1282,6 +1282,19 @@
   }
 
   // ── API layer ────────────────────────────────────────────────────────────
+  /**
+   * Appends userId/userName to a request path, preserving any query string it already has.
+   * Values already present are left untouched so an explicit caller always wins.
+   */
+  function withIdentity(path) {
+    const [base, query] = path.split('?');
+    const params = new URLSearchParams(query || '');
+    if (USER_ID && !params.has('userId')) params.set('userId', USER_ID);
+    if (USER_NAME && !params.has('userName')) params.set('userName', USER_NAME);
+    const qs = params.toString();
+    return qs ? base + '?' + qs : base;
+  }
+
   async function apiFetch(path, options) {
     options = options || {};
     const headers = Object.assign({}, options.headers || {});
@@ -1295,7 +1308,12 @@
     } else {
       headers['X-Api-Key'] = API_KEY;
     }
-    const res = await fetch(SERVER + path, Object.assign({}, options, { headers: headers }));
+    // With an API key there is no cédula inside the credential, so the backend saw every call as
+    // anonymous and denied the author of a file its own delete with "no eres el propietario".
+    // The identity given to the widget travels as query parameters, which every endpoint that
+    // needs it already accepts. Not added on the Bearer path: the token already carries it.
+    const url = (!token && (USER_ID || USER_NAME)) ? withIdentity(path) : path;
+    const res = await fetch(SERVER + url, Object.assign({}, options, { headers: headers }));
     if (!res.ok) {
       let msg = 'HTTP ' + res.status;
       try {
@@ -1715,7 +1733,26 @@
       const loading = _editorOverlay.querySelector('.op-editor-loading');
       // cfg.documentServer is the browser-reachable public URL of the OnlyOffice document server
       // (e.g. http://localhost:8081). The internal Docker hostname is never sent to the browser.
-      const scriptSrc = cfg.documentServer.replace(/\/$/, '') + '/web-apps/apps/api/documents/api.js';
+      let docServer = (cfg.documentServer || '').trim();
+      try {
+        if (docServer) {
+          const dsUrl = new URL(docServer);
+          if (dsUrl.hostname === 'localhost' || dsUrl.hostname === '127.0.0.1') {
+            let refHost = '';
+            if (SERVER_URL) {
+              try { refHost = new URL(SERVER_URL, window.location.href).hostname; } catch (_) {}
+            }
+            if (!refHost && window.location && window.location.hostname) {
+              refHost = window.location.hostname;
+            }
+            if (refHost && refHost !== 'localhost' && refHost !== '127.0.0.1') {
+              dsUrl.hostname = refHost;
+              docServer = dsUrl.toString().replace(/\/$/, '');
+            }
+          }
+        }
+      } catch (_) {}
+      const scriptSrc = docServer.replace(/\/$/, '') + '/web-apps/apps/api/documents/api.js';
 
       const script = document.createElement('script');
       script.id = 'op-oo-script';

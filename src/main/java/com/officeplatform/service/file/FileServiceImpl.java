@@ -20,12 +20,14 @@ import com.officeplatform.dto.request.UploadFileRequest;
 import com.officeplatform.entity.ActivityAction;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
+import com.officeplatform.entity.SharePermissionEntity;
 import com.officeplatform.exception.FileNotFoundException;
 import com.officeplatform.exception.FolderNotFoundException;
 import com.officeplatform.exception.StorageException;
 import com.officeplatform.exception.UnsupportedFileTypeException;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
+import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.activity.ActivityLogRecorder;
 import com.officeplatform.service.storage.StorageService;
 import com.officeplatform.util.DocxUtils;
@@ -59,6 +61,7 @@ public class FileServiceImpl implements FileService {
 
     private final FileRepository fileRepository;
     private final FolderRepository folderRepository;
+    private final SharePermissionRepository sharePermissionRepository;
     private final StorageService storageService;
     private final ActivityLogRecorder activityLogRecorder;
     private final String bucket;
@@ -67,12 +70,14 @@ public class FileServiceImpl implements FileService {
     public FileServiceImpl(
             FileRepository fileRepository,
             FolderRepository folderRepository,
+            SharePermissionRepository sharePermissionRepository,
             StorageService storageService,
             ActivityLogRecorder activityLogRecorder,
             @Value("${office-platform.storage.minio.bucket}") String bucket,
             @Value("${office-platform.storage.allowed-mime-types}") String allowedMimeTypesRaw) {
         this.fileRepository = fileRepository;
         this.folderRepository = folderRepository;
+        this.sharePermissionRepository = sharePermissionRepository;
         this.storageService = storageService;
         this.activityLogRecorder = activityLogRecorder;
         this.bucket = bucket;
@@ -94,7 +99,9 @@ public class FileServiceImpl implements FileService {
         // cédula can never fall through into somebody else's private files.
         if ("shared".equalsIgnoreCase(scope)) {
             if (folderId != null) {
-                return fileRepository.findAllByApiKeyIdAndFolderIdAndDeletedAtIsNull(apiKeyId, folderId);
+                FolderEntity folder = folderRepository.findById(folderId).orElse(null);
+                Long targetApiKey = (folder != null) ? folder.getApiKeyId() : apiKeyId;
+                return fileRepository.findAllByApiKeyIdAndFolderIdAndDeletedAtIsNull(targetApiKey, folderId);
             }
             return fileRepository.findAllByApiKeyIdAndFolderIdIsNullAndUserIdIsNullAndDeletedAtIsNull(apiKeyId);
         }
@@ -351,27 +358,93 @@ public class FileServiceImpl implements FileService {
      */
     @Override
     public FileEntity getFile(Long fileId, Long apiKeyId, String userId) {
-        FileEntity sameProject = fileRepository
-                .findByIdAndApiKeyIdAndDeletedAtIsNull(fileId, apiKeyId).orElse(null);
-        if (sameProject != null) {
-            return sameProject;
-        }
-
-        if (userId == null || userId.isBlank()) {
+        FileEntity file = fileRepository.findByIdAndDeletedAtIsNull(fileId).orElse(null);
+        if (file == null) {
             throw new FileNotFoundException(fileId);
         }
-        String owner = userId.trim();
 
-        return fileRepository.findByIdAndDeletedAtIsNull(fileId)
-                .filter(file -> file.getUserId() != null
-                        && file.getUserId().trim().equalsIgnoreCase(owner))
-                .orElseThrow(() -> new FileNotFoundException(fileId));
+        // 1. Same project
+        if (apiKeyId != null && apiKeyId.equals(file.getApiKeyId())) {
+            return file;
+        }
+
+        // 2. Owner of personal file (decentralized "Mis archivos")
+        if (userId != null && !userId.isBlank() && file.getUserId() != null
+                && file.getUserId().trim().equalsIgnoreCase(userId.trim())) {
+            return file;
+        }
+
+        // 3. Shared directly with user (cédula) or target project across the platform
+        if (hasAccessViaShare(file, apiKeyId, userId)) {
+            return file;
+        }
+
+        throw new FileNotFoundException(fileId);
+    }
+
+    private boolean hasAccessViaShare(FileEntity file, Long apiKeyId, String userId) {
+        if (sharePermissionRepository == null) return false;
+        String cleanUserId = (userId != null && !userId.isBlank()) ? userId.trim() : null;
+
+        // Direct file permission across projects
+        List<SharePermissionEntity> filePerms = sharePermissionRepository
+                .findAllByResourceTypeAndResourceId(SharePermissionEntity.ResourceType.FILE, file.getId());
+        for (SharePermissionEntity p : filePerms) {
+            if (p.getTargetType() == SharePermissionEntity.TargetType.USER
+                    && cleanUserId != null && cleanUserId.equalsIgnoreCase(p.getTargetUserId())) {
+                return true;
+            }
+            if (p.getTargetType() == SharePermissionEntity.TargetType.PROJECT
+                    && apiKeyId != null && apiKeyId.equals(p.getTargetApiKeyId())) {
+                return true;
+            }
+        }
+
+        // Inherited permission from parent folder across projects
+        if (file.getFolderId() != null) {
+            List<SharePermissionEntity> folderPerms = sharePermissionRepository
+                    .findAllByResourceTypeAndResourceId(SharePermissionEntity.ResourceType.FOLDER, file.getFolderId());
+            for (SharePermissionEntity p : folderPerms) {
+                if (p.getTargetType() == SharePermissionEntity.TargetType.USER
+                        && cleanUserId != null && cleanUserId.equalsIgnoreCase(p.getTargetUserId())) {
+                    return true;
+                }
+                if (p.getTargetType() == SharePermissionEntity.TargetType.PROJECT
+                        && apiKeyId != null && apiKeyId.equals(p.getTargetApiKeyId())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @Override
     public FileEntity getFileIncludingTrashed(Long fileId, Long apiKeyId) {
         return fileRepository.findByIdAndApiKeyId(fileId, apiKeyId)
+            .or(() -> fileRepository.findById(fileId))
             .orElseThrow(() -> new FileNotFoundException(fileId));
+    }
+
+    /**
+     * Same lookup, restricted to what the caller may legitimately reach: a file in the caller's
+     * project, or a private file the caller owns under another project (decentralized
+     * "Mis archivos"). Used by the delete/restore/purge gate so a missing file answers 404 while a
+     * file belonging to somebody else is left for the ownership check to reject with 403.
+     */
+    @Override
+    public FileEntity getFileIncludingTrashed(Long fileId, Long apiKeyId, String userId) {
+        FileEntity sameProject = fileRepository.findByIdAndApiKeyId(fileId, apiKeyId).orElse(null);
+        if (sameProject != null) {
+            return sameProject;
+        }
+        if (userId == null || userId.isBlank()) {
+            throw new FileNotFoundException(fileId);
+        }
+        String owner = userId.trim();
+        return fileRepository.findById(fileId)
+                .filter(file -> file.getUserId() != null
+                        && file.getUserId().trim().equalsIgnoreCase(owner))
+                .orElseThrow(() -> new FileNotFoundException(fileId));
     }
 
     @Override
@@ -413,6 +486,7 @@ public class FileServiceImpl implements FileService {
     @Transactional
     public FileEntity restoreFile(Long fileId, Long apiKeyId, String userId, String userName) {
         FileEntity fileEntity = fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNotNull(fileId, apiKeyId)
+            .or(() -> fileRepository.findByIdAndDeletedAtIsNotNull(fileId))
             .orElseThrow(() -> new FileNotFoundException(fileId));
 
         fileEntity.setDeletedAt(null);
@@ -426,6 +500,7 @@ public class FileServiceImpl implements FileService {
     @Transactional
     public void purgeFile(Long fileId, Long apiKeyId, String userId, String userName) {
         FileEntity fileEntity = fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNotNull(fileId, apiKeyId)
+            .or(() -> fileRepository.findByIdAndDeletedAtIsNotNull(fileId))
             .orElseThrow(() -> new FileNotFoundException(fileId));
 
         storageService.delete(fileEntity.getObjectName());

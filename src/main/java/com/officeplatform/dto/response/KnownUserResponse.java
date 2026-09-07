@@ -29,4 +29,6 @@ public class KnownUserResponse {
 
     private LocalDateTime lastSeenAt;
 
+    private java.util.List<String> consumingApps;
+
 }

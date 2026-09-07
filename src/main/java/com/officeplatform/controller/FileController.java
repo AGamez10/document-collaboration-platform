@@ -384,7 +384,7 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        assertOwnerOrAdmin(id, principal, "eliminar");
+        assertOwnerOrAdmin(id, principal, userId, userName, "eliminar");
 
         fileService.softDeleteFile(id, principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
@@ -404,7 +404,7 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        assertOwnerOrAdmin(id, principal, "restaurar");
+        assertOwnerOrAdmin(id, principal, userId, userName, "restaurar");
 
         FileEntity fileEntity = fileService.restoreFile(id, principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
@@ -425,7 +425,7 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        assertOwnerOrAdmin(id, principal, "eliminar permanentemente");
+        assertOwnerOrAdmin(id, principal, userId, userName, "eliminar permanentemente");
 
         fileService.purgeFile(id, principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
@@ -449,12 +449,31 @@ public class FileController {
      * @throws ShareAccessDeniedException translated to HTTP 403 by GlobalExceptionHandler
      */
     private void assertOwnerOrAdmin(Long fileId, ApiKeyPrincipal principal, String action) {
+        assertOwnerOrAdmin(fileId, principal, null, null, action);
+    }
+
+    /**
+     * Destructive operations stay with the author or a project admin, judged on the identity the
+     * request actually carries.
+     *
+     * <p>The identity has to be forwarded: a widget using the classic {@code X-Api-Key} header has
+     * no cédula on the principal and sends it as a request parameter, so checking the principal
+     * alone rejected the very author of the file with "no eres el propietario".
+     *
+     * @param action verb used to build the error message ("eliminar", "restaurar", ...)
+     * @throws ShareAccessDeniedException translated to HTTP 403 by GlobalExceptionHandler
+     */
+    private void assertOwnerOrAdmin(Long fileId, ApiKeyPrincipal principal,
+                                    String userId, String userName, String action) {
         // Resolved first so a file that does not exist answers 404 instead of "no eres el
-        // propietario", which would be misleading for an already purged file.
-        fileService.getFileIncludingTrashed(fileId, principal.getApiKeyId());
+        // propietario", which would be misleading for an already purged file. Identity is passed
+        // so a private file this caller owns under another project resolves too.
+        fileService.getFileIncludingTrashed(fileId, principal.getApiKeyId(),
+                principal.resolveUserId(userId));
 
         boolean allowed = shareService.isOwnerOrAdmin(
-                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, fileId, principal);
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, fileId, principal,
+                userId, userName);
         if (!allowed) {
             throw new com.officeplatform.exception.ShareAccessDeniedException(
                     "No tienes permisos para " + action + " este archivo, no eres el propietario.");

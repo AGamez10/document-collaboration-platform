@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -415,6 +416,26 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
+    @Transactional
+    public int forceCloseAllSessions() {
+        List<EditorSessionEntity> activeSessions = editorSessionRepository.findAllByClosedAtIsNull();
+        LocalDateTime now = LocalDateTime.now();
+        int closedCount = 0;
+        for (EditorSessionEntity session : activeSessions) {
+            try {
+                onlyOfficeService.dropUser(session.getDocumentKey(), session.getUserId());
+            } catch (Exception e) {
+                log.warn("No se pudo desconectar al usuario de OnlyOffice (sessionId={}, documentKey={}): {}",
+                        session.getId(), session.getDocumentKey(), e.getMessage());
+            }
+            session.setClosedAt(now);
+            editorSessionRepository.save(session);
+            closedCount++;
+        }
+        return closedCount;
+    }
+
+    @Override
     public List<KnownUserResponse> listUsers(Long apiKeyId, String search) {
         Map<Long, String> apiKeyNamesById = new HashMap<>();
         apiKeyRepository.findAll().forEach(key -> apiKeyNamesById.put(key.getId(), key.getName()));
@@ -434,37 +455,109 @@ public class AdminServiceImpl implements AdminService {
                     .toList();
         }
 
-        return users.stream()
-                .sorted(Comparator.comparing(KnownUserEntity::getLastSeenAt).reversed())
-                .map(u -> KnownUserResponse.builder()
-                        .id(u.getId())
-                        .apiKeyId(u.getApiKeyId())
-                        .apiKeyName(apiKeyNamesById.getOrDefault(u.getApiKeyId(), "Proyecto #" + u.getApiKeyId()))
-                        .userId(u.getUserId())
-                        .displayName(u.getDisplayName())
-                        .role(u.getRole())
-                        .firstSeenAt(u.getFirstSeenAt())
-                        .lastSeenAt(u.getLastSeenAt())
-                        .build())
-                .toList();
+        // Group users strictly by cédula/userId so each person has a single consolidated row
+        Map<String, List<KnownUserEntity>> groupedByUserId = new LinkedHashMap<>();
+        for (KnownUserEntity u : users) {
+            String uid = (u.getUserId() != null) ? u.getUserId().trim() : "";
+            if (uid.isEmpty()) continue;
+            groupedByUserId.computeIfAbsent(uid, k -> new ArrayList<>()).add(u);
+        }
+
+        List<KnownUserResponse> result = new ArrayList<>();
+        for (Map.Entry<String, List<KnownUserEntity>> entry : groupedByUserId.entrySet()) {
+            String uid = entry.getKey();
+            List<KnownUserEntity> records = entry.getValue();
+
+            // Sort by lastSeenAt descending to pick latest record as primary
+            records.sort(Comparator.comparing(KnownUserEntity::getLastSeenAt).reversed());
+            KnownUserEntity latest = records.get(0);
+
+            // Earliest first seen
+            LocalDateTime earliestFirstSeen = records.stream()
+                    .map(KnownUserEntity::getFirstSeenAt)
+                    .filter(Objects::nonNull)
+                    .min(LocalDateTime::compareTo)
+                    .orElse(latest.getFirstSeenAt());
+
+            // Role: admin if admin in any project
+            boolean hasAdmin = records.stream().anyMatch(r -> "admin".equalsIgnoreCase(r.getRole()));
+            String effectiveRole = hasAdmin ? "admin" : "user";
+
+            // Consuming apps: distinct list of app names
+            List<String> consumingApps = records.stream()
+                    .map(r -> apiKeyNamesById.getOrDefault(r.getApiKeyId(), "Proyecto #" + r.getApiKeyId()))
+                    .distinct()
+                    .toList();
+
+            // Pick the best non-empty display name
+            String bestName = records.stream()
+                    .map(KnownUserEntity::getDisplayName)
+                    .filter(n -> n != null && !n.isBlank())
+                    .findFirst()
+                    .orElse(latest.getDisplayName());
+
+            result.add(KnownUserResponse.builder()
+                    .id(latest.getId())
+                    .apiKeyId(latest.getApiKeyId())
+                    .apiKeyName(String.join(", ", consumingApps))
+                    .consumingApps(consumingApps)
+                    .userId(uid)
+                    .displayName(bestName)
+                    .role(effectiveRole)
+                    .firstSeenAt(earliestFirstSeen)
+                    .lastSeenAt(latest.getLastSeenAt())
+                    .build());
+        }
+
+        result.sort(Comparator.comparing(KnownUserResponse::getLastSeenAt).reversed());
+        return result;
     }
 
     @Override
+    @Transactional
     public KnownUserResponse updateUserRole(Long knownUserId, String role) {
-        KnownUserEntity user = knownUserService.updateRole(knownUserId, role);
-        String apiKeyName = apiKeyRepository.findById(user.getApiKeyId())
-                .map(ApiKeyEntity::getName)
-                .orElse("Proyecto #" + user.getApiKeyId());
+        KnownUserEntity primary = knownUserRepository.findById(knownUserId)
+                .orElseThrow(() -> new StorageException("El usuario no existe: " + knownUserId));
+
+        // Synchronize role across all project registrations for this same cédula
+        String targetUserId = primary.getUserId();
+        if (targetUserId != null && !targetUserId.isBlank()) {
+            List<KnownUserEntity> allForUser = knownUserRepository.findAll().stream()
+                    .filter(u -> u.getUserId() != null && u.getUserId().trim().equalsIgnoreCase(targetUserId.trim()))
+                    .toList();
+            for (KnownUserEntity u : allForUser) {
+                knownUserService.updateRole(u.getId(), role);
+            }
+        } else {
+            knownUserService.updateRole(primary.getId(), role);
+        }
+
+        KnownUserEntity updated = knownUserRepository.findById(knownUserId).orElse(primary);
+        List<String> consumingApps = new ArrayList<>();
+        if (targetUserId != null && !targetUserId.isBlank()) {
+            consumingApps = knownUserRepository.findAll().stream()
+                    .filter(u -> u.getUserId() != null && u.getUserId().trim().equalsIgnoreCase(targetUserId.trim()))
+                    .map(u -> apiKeyRepository.findById(u.getApiKeyId()).map(ApiKeyEntity::getName).orElse("Proyecto #" + u.getApiKeyId()))
+                    .distinct()
+                    .toList();
+        }
+        if (consumingApps.isEmpty()) {
+            String singleName = apiKeyRepository.findById(updated.getApiKeyId())
+                    .map(ApiKeyEntity::getName)
+                    .orElse("Proyecto #" + updated.getApiKeyId());
+            consumingApps = List.of(singleName);
+        }
 
         return KnownUserResponse.builder()
-                .id(user.getId())
-                .apiKeyId(user.getApiKeyId())
-                .apiKeyName(apiKeyName)
-                .userId(user.getUserId())
-                .displayName(user.getDisplayName())
-                .role(user.getRole())
-                .firstSeenAt(user.getFirstSeenAt())
-                .lastSeenAt(user.getLastSeenAt())
+                .id(updated.getId())
+                .apiKeyId(updated.getApiKeyId())
+                .apiKeyName(String.join(", ", consumingApps))
+                .consumingApps(consumingApps)
+                .userId(updated.getUserId())
+                .displayName(updated.getDisplayName())
+                .role(role)
+                .firstSeenAt(updated.getFirstSeenAt())
+                .lastSeenAt(updated.getLastSeenAt())
                 .build();
     }
 

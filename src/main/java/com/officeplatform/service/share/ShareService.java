@@ -51,4 +51,17 @@ public interface ShareService {
      */
     boolean isOwnerOrAdmin(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal);
 
+    /**
+     * Same check, judged on the identity carried by the request.
+     *
+     * <p>Callers authenticated with the classic {@code X-Api-Key} header have no cédula on the
+     * principal and pass it as request parameters; resolving identity only from the principal
+     * denied those callers even when they were the author.
+     *
+     * @param requestUserId   cédula supplied by the request, or {@code null} to use the principal
+     * @param requestUserName display name supplied by the request, or {@code null}
+     */
+    boolean isOwnerOrAdmin(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal,
+                           String requestUserId, String requestUserName);
+
 }

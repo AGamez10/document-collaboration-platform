@@ -53,6 +53,12 @@ public interface FileService {
      */
     FileEntity getFileIncludingTrashed(Long fileId, Long apiKeyId);
 
+    /**
+     * Same lookup, also matching a private file this caller owns under another project, so the
+     * decentralized "Mis archivos" can restore and purge from any consumer application.
+     */
+    FileEntity getFileIncludingTrashed(Long fileId, Long apiKeyId, String userId);
+
     FileEntity renameFile(Long fileId, Long apiKeyId, String newName, String userId, String userName);
 
     void softDeleteFile(Long fileId, Long apiKeyId, String userId, String userName);

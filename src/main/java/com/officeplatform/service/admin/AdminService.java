@@ -48,6 +48,8 @@ public interface AdminService {
 
     void forceCloseSession(Long sessionId);
 
+    int forceCloseAllSessions();
+
     List<KnownUserResponse> listUsers(Long apiKeyId, String search);
 
     /** Platform-admin operation: designate a known user's role ("user" | "admin") in its project. */

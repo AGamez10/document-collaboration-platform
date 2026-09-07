@@ -46,10 +46,33 @@ public class EditorController {
             @PathVariable Long id,
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) String userName,
-            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+            @AuthenticationPrincipal ApiKeyPrincipal principal,
+            HttpServletRequest request) {
 
         EditorConfigResponse config = editorService.getEditorConfig(id, principal,
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
+
+        if (config != null && config.getDocumentServer() != null && request != null) {
+            String clientHost = resolveClientFacingHost(request);
+            if (clientHost != null && !clientHost.equalsIgnoreCase("localhost") && !clientHost.equals("127.0.0.1")) {
+                try {
+                    java.net.URI currentUri = new java.net.URI(config.getDocumentServer());
+                    if ("localhost".equalsIgnoreCase(currentUri.getHost()) || "127.0.0.1".equals(currentUri.getHost())) {
+                        java.net.URI adaptedUri = new java.net.URI(
+                                currentUri.getScheme(),
+                                currentUri.getUserInfo(),
+                                clientHost,
+                                currentUri.getPort(),
+                                currentUri.getPath(),
+                                currentUri.getQuery(),
+                                currentUri.getFragment()
+                        );
+                        config.setDocumentServer(adaptedUri.toString().replaceAll("/$", ""));
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
 
         ApiResponse<EditorConfigResponse> response = ApiResponse.<EditorConfigResponse>builder()
                 .success(true)
@@ -58,6 +81,18 @@ public class EditorController {
                 .build();
 
         return ResponseEntity.ok(response);
+    }
+
+    private String resolveClientFacingHost(HttpServletRequest request) {
+        String forwardedHost = request.getHeader("X-Forwarded-Host");
+        if (forwardedHost != null && !forwardedHost.isBlank()) {
+            return forwardedHost.split(",")[0].trim().split(":")[0].trim();
+        }
+        String hostHeader = request.getHeader("Host");
+        if (hostHeader != null && !hostHeader.isBlank()) {
+            return hostHeader.split(":")[0].trim();
+        }
+        return request.getServerName();
     }
 
     @PostMapping("/api/editor/{id}/close")

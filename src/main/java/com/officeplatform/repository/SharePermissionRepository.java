@@ -19,6 +19,9 @@ public interface SharePermissionRepository extends JpaRepository<SharePermission
     /** All resources shared directly WITH a specific user (by cédula). */
     List<SharePermissionEntity> findAllByTargetTypeAndTargetUserId(TargetType targetType, String targetUserId);
 
+    /** All permissions attached to a specific resource across projects. */
+    List<SharePermissionEntity> findAllByResourceTypeAndResourceId(ResourceType resourceType, Long resourceId);
+
     /** All resources shared WITH a specific project (by target API key id). */
     List<SharePermissionEntity> findAllByTargetTypeAndTargetApiKeyId(TargetType targetType, Long targetApiKeyId);
 

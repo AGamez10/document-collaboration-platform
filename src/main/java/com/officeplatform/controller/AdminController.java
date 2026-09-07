@@ -230,6 +230,19 @@ public class AdminController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/editor-sessions/close-all")
+    public ResponseEntity<ApiResponse<Integer>> forceCloseAllSessions() {
+        int closedCount = adminService.forceCloseAllSessions();
+
+        ApiResponse<Integer> response = ApiResponse.<Integer>builder()
+                .success(true)
+                .message(closedCount + " sesiones activas cerradas correctamente")
+                .data(closedCount)
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/users")
     public ResponseEntity<ApiResponse<List<KnownUserResponse>>> listUsers(
             @RequestParam(required = false) Long apiKeyId,

@@ -123,11 +123,7 @@ public class FolderController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level = shareService.getEffectivePermission(
-                com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, id, principal);
-        if (level != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
-            throw new com.officeplatform.exception.ShareAccessDeniedException("Se requieren permisos de edición para renombrar esta carpeta.");
-        }
+        assertFolderOwnerOrAdmin(id, principal, userId, userName, "renombrar");
 
         FolderEntity folder = folderService.renameFolder(
                 id, request.getName(), principal.getApiKeyId(),
@@ -175,11 +171,7 @@ public class FolderController {
             @RequestParam(required = false) String scope,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level = shareService.getEffectivePermission(
-                com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, id, principal);
-        if (level != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
-            throw new com.officeplatform.exception.ShareAccessDeniedException("Se requieren permisos de edición para mover esta carpeta.");
-        }
+        assertFolderOwnerOrAdmin(id, principal, userId, userName, "mover");
 
         if (request.getParentId() != null) {
             com.officeplatform.entity.SharePermissionEntity.PermissionLevel destLevel = shareService.getEffectivePermission(
@@ -209,11 +201,7 @@ public class FolderController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level = shareService.getEffectivePermission(
-                com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, id, principal);
-        if (level != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
-            throw new com.officeplatform.exception.ShareAccessDeniedException("Se requieren permisos de edición para eliminar esta carpeta.");
-        }
+        assertFolderOwnerOrAdmin(id, principal, userId, userName, "eliminar");
 
         folderService.deleteFolder(id, principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
@@ -233,4 +221,29 @@ public class FolderController {
                 entity.getCreatedByUserId(), entity.getUpdatedByName(), false);
     }
 
+
+    /**
+     * Destructive and structural operations on a folder stay with its author or a project admin.
+     *
+     * <p>Deliberately stricter than the EDIT check these endpoints used before: an unrestricted
+     * folder in the shared space resolves to EDIT for every member of the project, so gating
+     * deletion on EDIT let any member destroy somebody else's folder tree. Editing a document is
+     * not the same right as deleting the structure that holds it.
+     *
+     * <p>Identity is forwarded because a caller using the classic {@code X-Api-Key} header carries
+     * its cédula in request parameters rather than on the principal.
+     *
+     * @param action verb used to build the error message ("eliminar", "renombrar", "mover")
+     * @throws ShareAccessDeniedException translated to HTTP 403 by GlobalExceptionHandler
+     */
+    private void assertFolderOwnerOrAdmin(Long folderId, ApiKeyPrincipal principal,
+                                          String userId, String userName, String action) {
+        boolean allowed = shareService.isOwnerOrAdmin(
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, folderId,
+                principal, userId, userName);
+        if (!allowed) {
+            throw new com.officeplatform.exception.ShareAccessDeniedException(
+                    "No tienes permisos para " + action + " esta carpeta, no eres el propietario.");
+        }
+    }
 }

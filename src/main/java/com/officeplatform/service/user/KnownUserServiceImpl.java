@@ -1,7 +1,11 @@
 package com.officeplatform.service.user;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -80,7 +84,8 @@ public class KnownUserServiceImpl implements KnownUserService {
 
     @Override
     public List<KnownUserEntity> listUsers(Long apiKeyId) {
-        return knownUserRepository.findAllByApiKeyId(apiKeyId);
+        List<KnownUserEntity> all = knownUserRepository.findAllByOrderByLastSeenAtDesc();
+        return deduplicateUsers(all, apiKeyId);
     }
 
     @Override
@@ -88,7 +93,37 @@ public class KnownUserServiceImpl implements KnownUserService {
         if (term == null || term.isBlank()) {
             return List.of();
         }
-        return knownUserRepository.findAllByApiKeyIdAndDisplayNameContainingIgnoreCase(apiKeyId, term.trim());
+        List<KnownUserEntity> matched = knownUserRepository.searchAllByTerm(term.trim());
+        return deduplicateUsers(matched, apiKeyId);
+    }
+
+    private List<KnownUserEntity> deduplicateUsers(List<KnownUserEntity> users, Long preferredApiKeyId) {
+        if (users == null || users.isEmpty()) {
+            return List.of();
+        }
+        Map<String, KnownUserEntity> unique = new LinkedHashMap<>();
+        for (KnownUserEntity u : users) {
+            String uid = u.getUserId();
+            if (uid == null || uid.isBlank()) continue;
+            KnownUserEntity existing = unique.get(uid);
+            if (existing == null) {
+                unique.put(uid, u);
+            } else if (preferredApiKeyId != null && Objects.equals(u.getApiKeyId(), preferredApiKeyId)
+                    && !Objects.equals(existing.getApiKeyId(), preferredApiKeyId)) {
+                unique.put(uid, u);
+            }
+        }
+        List<KnownUserEntity> result = new ArrayList<>(unique.values());
+        if (preferredApiKeyId != null) {
+            result.sort((a, b) -> {
+                boolean aPref = Objects.equals(a.getApiKeyId(), preferredApiKeyId);
+                boolean bPref = Objects.equals(b.getApiKeyId(), preferredApiKeyId);
+                if (aPref && !bPref) return -1;
+                if (!aPref && bPref) return 1;
+                return 0;
+            });
+        }
+        return result;
     }
 
     @Override
