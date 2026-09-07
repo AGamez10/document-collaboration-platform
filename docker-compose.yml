@@ -48,6 +48,23 @@ services:
       - "8081:80"
     volumes:
       - onlyoffice_data:/var/www/onlyoffice/Data
+      # Plugins mounted from the repository instead of living in the container writable
+      # layer, where they were lost the moment the container was recreated. The image
+      # ships none of them even though plugin-list-default.json declares them, so without
+      # this the Extensiones tab is empty and the Macros button never appears.
+      # Mounted one by one: mounting the parent directory would hide marketplace/, v1/
+      # and pluginBase.js, which the editor needs.
+      - "./onlyoffice-plugins/{07FD8DFA-DFE0-4089-AL24-0730933CC80A}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{07FD8DFA-DFE0-4089-AL24-0730933CC80A}:ro"
+      - "./onlyoffice-plugins/{38E022EA-AD92-45FC-B22B-49DF39746DB4}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{38E022EA-AD92-45FC-B22B-49DF39746DB4}:ro"
+      - "./onlyoffice-plugins/{440EBF13-9B19-4BD8-8621-05200E58140B}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{440EBF13-9B19-4BD8-8621-05200E58140B}:ro"
+      - "./onlyoffice-plugins/{7327FC95-16DA-41D9-9AF2-0E7F449F6800}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{7327FC95-16DA-41D9-9AF2-0E7F449F6800}:ro"
+      - "./onlyoffice-plugins/{BE5CBF95-C0AD-4842-B157-AC40FEDD9441}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{BE5CBF95-C0AD-4842-B157-AC40FEDD9441}:ro"
+      - "./onlyoffice-plugins/{BE5CBF95-C0AD-4842-B157-AC40FEDD9840}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{BE5CBF95-C0AD-4842-B157-AC40FEDD9840}:ro"
+      - "./onlyoffice-plugins/{BE5CBF95-C0AD-4842-B157-AC40FEDD9841}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{BE5CBF95-C0AD-4842-B157-AC40FEDD9841}:ro"
+      - "./onlyoffice-plugins/{BFC5D5C6-89DE-4168-9565-ABD8D1E48711}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{BFC5D5C6-89DE-4168-9565-ABD8D1E48711}:ro"
+      - "./onlyoffice-plugins/{D71C2EF0-F15B-47C7-80E9-86D671F9C595}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{D71C2EF0-F15B-47C7-80E9-86D671F9C595}:ro"
+      - "./onlyoffice-plugins/{DB38923B-A8C0-4DE9-8AEE-A61BB5C901A5}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{DB38923B-A8C0-4DE9-8AEE-A61BB5C901A5}:ro"
+      - "./onlyoffice-plugins/{E6978D28-0441-4BD7-8346-82FAD68BCA3B}:/var/www/onlyoffice/documentserver/sdkjs-plugins/{E6978D28-0441-4BD7-8346-82FAD68BCA3B}:ro"
     networks:
       - office-platform-net
 
