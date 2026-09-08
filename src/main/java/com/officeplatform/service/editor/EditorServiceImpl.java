@@ -34,6 +34,7 @@ import com.officeplatform.util.UrlUtils;
 import com.officeplatform.service.share.ShareService;
 
 @Service
+@lombok.extern.slf4j.Slf4j
 public class EditorServiceImpl implements EditorService {
 
     private static final int SAVE_STATUS = 2;
@@ -59,6 +60,7 @@ public class EditorServiceImpl implements EditorService {
     private final EditorSessionRepository editorSessionRepository;
     private final RestTemplate restTemplate;
     private final ShareService shareService;
+    private final com.officeplatform.service.notification.NotificationService notificationService;
     private final String documentServerUrl;
     private final String documentServerPublicUrl;
     private final String callbackUrl;
@@ -73,6 +75,7 @@ public class EditorServiceImpl implements EditorService {
             EditorSessionRepository editorSessionRepository,
             RestTemplate restTemplate,
             ShareService shareService,
+            com.officeplatform.service.notification.NotificationService notificationService,
             @Value("${office-platform.onlyoffice.document-server-url}") String documentServerUrl,
             @Value("${office-platform.onlyoffice.document-server-public-url}") String documentServerPublicUrl,
             @Value("${office-platform.onlyoffice.callback-url}") String callbackUrl,
@@ -85,6 +88,7 @@ public class EditorServiceImpl implements EditorService {
         this.editorSessionRepository = editorSessionRepository;
         this.restTemplate = restTemplate;
         this.shareService = shareService;
+        this.notificationService = notificationService;
         this.documentServerUrl = documentServerUrl;
         // Sanitised at construction so every consumer of this field gets a usable URL. The
         // property has a default, but Docker Compose exports the variable as an empty string,
@@ -179,6 +183,23 @@ public class EditorServiceImpl implements EditorService {
 
         activityLogRecorder.record(principal.getApiKeyId(), userId, userName, ActivityAction.EDITOR_OPEN,
                 fileEntity.getId(), fileEntity.getOriginalFileName(), null, fileEntity.getFolderId());
+
+        // Se avisa al autor cuando otra persona abre su documento. El servicio ignora el caso
+        // de abrir lo propio, así que acá no hace falta repetir esa condición.
+        // Envuelto en try/catch además del REQUIRES_NEW del servicio: notificar es información
+        // secundaria y jamás debe impedir que alguien abra un documento.
+        try {
+            notificationService.notifyResourceOpened(
+                    fileEntity.getCreatedByUserId(),
+                    resolvedUserId,
+                    resolvedUserName,
+                    fileEntity.getId(),
+                    "FILE",
+                    fileEntity.getOriginalFileName());
+        } catch (RuntimeException e) {
+            log.warn("No se pudo notificar la apertura del archivo {}: {}",
+                    fileEntity.getId(), e.getMessage());
+        }
 
         return new EditorConfigResponse(document, documentServerPublicUrl, user, permissions, token,
                 editorConfig, activeSessionsCount, savedSession.getId());

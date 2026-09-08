@@ -304,6 +304,108 @@
       line-height: 1.6; max-width: 420px;
     }
 
+    .op-withme-when {
+      font-size: 11px; color: var(--op-text-dim); margin-top: 2px;
+    }
+    .op-withme-project {
+      display: inline-block; margin-top: 6px; padding: 2px 8px;
+      background: var(--op-bg-soft); border: 1px solid var(--op-border);
+      border-radius: 999px; font-size: 10.5px; font-weight: 600;
+      color: var(--op-text-dim); max-width: 100%;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .op-withme-note {
+      margin-top: 8px; padding: 6px 9px;
+      background: var(--op-bg-soft); border-left: 3px solid var(--op-accent);
+      border-radius: 0 var(--op-radius-sm) var(--op-radius-sm) 0;
+      font-size: 11.5px; font-style: italic; color: var(--op-text-dim);
+      line-height: 1.45; text-align: left;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .op-share-notes { display: block; margin-bottom: 10px; }
+    .op-share-notes > span {
+      display: block; margin-bottom: 5px;
+      font-size: 11.5px; font-weight: 600; color: var(--op-text-dim);
+    }
+    .op-share-notes textarea {
+      width: 100%; padding: 8px 10px; resize: vertical;
+      background: var(--op-bg-soft); color: var(--op-text);
+      border: 1px solid var(--op-border); border-radius: var(--op-radius-sm);
+      font-family: inherit; font-size: 12.5px; line-height: 1.5;
+    }
+    .op-share-notes textarea:focus {
+      outline: none; border-color: var(--op-accent);
+    }
+    .op-share-perm-note {
+      display: block; margin-top: 3px;
+      font-size: 11.5px; font-style: italic; color: var(--op-text-dim);
+      line-height: 1.45;
+      /* Una nota larga no debe empujar la fila: se recorta y queda en el title. */
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px;
+    }
+
+    /* El contenedor del botón necesita posición relativa para anclar el popover
+       y el badge; sin eso ambos se anclan al viewport. */
+    /* La toolbar ancla el popover: sin posición explícita el panel se posiciona
+       contra un ancestro cualquiera y termina fuera de lugar. */
+    .op-toolbar { position: relative; }
+    .op-notifications-btn {
+      position: relative; width: 32px; height: 32px; flex: 0 0 auto;
+      border: 1px solid var(--op-border); border-radius: 50%;
+      background: transparent; color: var(--op-text-dim); cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s ease;
+    }
+    .op-notifications-btn svg { width: 16px; height: 16px; }
+    .op-notifications-btn:hover {
+      background: var(--op-accent); border-color: var(--op-accent); color: #fff;
+    }
+    .op-notif-badge {
+      position: absolute; top: -4px; right: -4px; min-width: 17px; height: 17px;
+      padding: 0 4px; border-radius: 999px;
+      background: #ef4444; color: #fff; border: 2px solid var(--op-bg-card);
+      font-size: 9.5px; font-weight: 700; line-height: 13px; text-align: center;
+    }
+    .op-notif-panel {
+      position: absolute; top: calc(100% + 8px); right: 0; z-index: 60;
+      width: 330px; max-width: 92vw;
+      background: var(--op-bg-card); border: 1px solid var(--op-border);
+      border-radius: var(--op-radius-md);
+      box-shadow: 0 16px 40px rgba(0,0,0,.28);
+      overflow: hidden;
+    }
+    .op-notif-head {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 11px 13px; border-bottom: 1px solid var(--op-border);
+      font-size: 13px; font-weight: 700;
+    }
+    .op-notif-markall {
+      appearance: none; border: 0; background: transparent; cursor: pointer;
+      color: var(--op-accent); font-family: inherit; font-size: 11px; font-weight: 600;
+      padding: 0; white-space: nowrap;
+    }
+    .op-notif-markall:hover { text-decoration: underline; }
+    .op-notif-list { max-height: 340px; overflow-y: auto; }
+    .op-notif-item {
+      display: flex; gap: 10px; padding: 11px 13px;
+      border-bottom: 1px solid var(--op-border);
+    }
+    .op-notif-item.is-unread { background: var(--op-bg-soft); cursor: pointer; }
+    .op-notif-item.is-unread:hover { background: var(--op-bg-hover); }
+    /* La barra lateral marca lo no leído sin depender solo del color de fondo. */
+    .op-notif-item.is-unread { border-left: 3px solid var(--op-accent); padding-left: 10px; }
+    .op-notif-icon { flex: 0 0 auto; color: var(--op-text-dim); padding-top: 1px; }
+    .op-notif-icon svg { width: 15px; height: 15px; }
+    .op-notif-body { min-width: 0; }
+    .op-notif-msg { font-size: 12.5px; line-height: 1.45; color: var(--op-text); }
+    .op-notif-when { margin-top: 3px; font-size: 11px; color: var(--op-text-dim); }
+    .op-notif-empty {
+      padding: 26px 16px; text-align: center;
+      font-size: 12.5px; color: var(--op-text-dim);
+    }
+
     .op-macros-help-btn {
       width: 32px; height: 32px; flex: 0 0 auto;
       border: 1px solid var(--op-border); border-radius: 50%;
@@ -1134,6 +1236,7 @@
     restore: icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>'),
     rename: icon('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
     move: icon('<polyline points="16 3 21 3 21 8"/><line x1="21" y1="3" x2="14" y2="10"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/>'),
+    bell: icon('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'),
     open: icon('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
     folder: icon('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
     share: icon('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>'),
@@ -1492,6 +1595,11 @@
 
   async function listProjectsApi() {
     const res = await apiFetch('/api/projects');
+    return (await res.json()).data || [];
+  }
+
+  async function searchProjectsApi(term) {
+    const res = await apiFetch('/api/projects/search?q=' + encodeURIComponent(term));
     return (await res.json()).data || [];
   }
 
@@ -1934,6 +2042,190 @@
     box.appendChild(p);
     box.appendChild(resume);
     host.appendChild(box);
+  }
+
+
+  // ── Notificaciones ─────────────────────────────────────────────────────────
+  // Quien comparte un documento no tiene forma de saber si alguien lo miró. Esto
+  // le avisa. Es informativo: si el sondeo falla, el gestor sigue funcionando sin
+  // molestar al usuario con errores que no puede resolver.
+
+  const NOTIF_POLL_MS = 60000;
+
+  let _notifTimer = null;
+  let _notifPanel = null;
+  let _notifItems = [];
+  let _notifUnread = 0;
+
+  async function fetchNotificationsApi() {
+    const res = await apiFetch('/api/notifications');
+    return (await res.json()).data || { notifications: [], unreadCount: 0 };
+  }
+
+  async function markNotificationReadApi(id) {
+    await apiFetch('/api/notifications/' + id + '/read', { method: 'POST' });
+  }
+
+  async function markAllNotificationsReadApi() {
+    await apiFetch('/api/notifications/read-all', { method: 'POST' });
+  }
+
+  /** "hace 5 minutos", "hace 2 horas", "ayer"… Más legible que una fecha exacta. */
+  function relativeTime(iso) {
+    if (!iso) return '';
+    const then = new Date(iso.endsWith('Z') ? iso : iso + 'Z');
+    if (isNaN(then.getTime())) return '';
+    const seconds = Math.floor((Date.now() - then.getTime()) / 1000);
+    if (seconds < 60) return 'hace un momento';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return 'hace ' + minutes + (minutes === 1 ? ' minuto' : ' minutos');
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return 'hace ' + hours + (hours === 1 ? ' hora' : ' horas');
+    const days = Math.floor(hours / 24);
+    if (days === 1) return 'ayer';
+    if (days < 30) return 'hace ' + days + ' días';
+    return formatDate(iso);
+  }
+
+  function updateNotifBadge() {
+    const btn = _container && _container.querySelector('.op-notifications-btn');
+    if (!btn) return;
+    let badge = btn.querySelector('.op-notif-badge');
+    if (_notifUnread > 0) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'op-notif-badge';
+        btn.appendChild(badge);
+      }
+      badge.textContent = _notifUnread > 99 ? '99+' : String(_notifUnread);
+    } else if (badge) {
+      badge.remove();
+    }
+  }
+
+  async function refreshNotifications(rerender) {
+    try {
+      const data = await fetchNotificationsApi();
+      _notifItems = data.notifications || [];
+      _notifUnread = data.unreadCount || 0;
+      updateNotifBadge();
+      if (rerender && _notifPanel) renderNotifList();
+    } catch (_) {
+      // Silencio deliberado: es información secundaria y el usuario no puede
+      // hacer nada al respecto. El próximo sondeo reintenta.
+    }
+  }
+
+  function startNotificationPolling() {
+    refreshNotifications(false);
+    if (_notifTimer) clearInterval(_notifTimer);
+    _notifTimer = setInterval(function () { refreshNotifications(true); }, NOTIF_POLL_MS);
+  }
+
+  function closeNotifPanel() {
+    if (_notifPanel && _notifPanel.parentNode) _notifPanel.parentNode.removeChild(_notifPanel);
+    _notifPanel = null;
+    document.removeEventListener('mousedown', onNotifOutsideClick, true);
+  }
+
+  function onNotifOutsideClick(e) {
+    if (!_notifPanel) return;
+    const btn = _container && _container.querySelector('.op-notifications-btn');
+    if (_notifPanel.contains(e.target) || (btn && btn.contains(e.target))) return;
+    closeNotifPanel();
+  }
+
+  function renderNotifList() {
+    if (!_notifPanel) return;
+    const list = _notifPanel.querySelector('.op-notif-list');
+    if (!list) return;
+    list.innerHTML = '';
+
+    if (_notifItems.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'op-notif-empty';
+      empty.textContent = 'No tienes notificaciones pendientes';
+      list.appendChild(empty);
+      return;
+    }
+
+    _notifItems.forEach(function (n) {
+      const item = document.createElement('div');
+      item.className = 'op-notif-item' + (n.read ? '' : ' is-unread');
+
+      const icon = document.createElement('div');
+      icon.className = 'op-notif-icon';
+      icon.innerHTML = ICONS.bell;
+
+      const body = document.createElement('div');
+      body.className = 'op-notif-body';
+      const msg = document.createElement('div');
+      msg.className = 'op-notif-msg';
+      msg.textContent = n.message;
+      const when = document.createElement('div');
+      when.className = 'op-notif-when';
+      when.textContent = relativeTime(n.createdAt);
+      body.appendChild(msg);
+      body.appendChild(when);
+
+      item.appendChild(icon);
+      item.appendChild(body);
+
+      if (!n.read) {
+        item.onclick = function () {
+          markNotificationReadApi(n.id).then(function () {
+            n.read = true;
+            _notifUnread = Math.max(0, _notifUnread - 1);
+            updateNotifBadge();
+            renderNotifList();
+          }).catch(function () {});
+        };
+      }
+      list.appendChild(item);
+    });
+  }
+
+  function toggleNotifPanel() {
+    if (_notifPanel) { closeNotifPanel(); return; }
+
+    const panel = document.createElement('div');
+    panel.className = 'op-notif-panel';
+
+    const head = document.createElement('div');
+    head.className = 'op-notif-head';
+    const title = document.createElement('span');
+    title.textContent = 'Notificaciones';
+    const markAll = document.createElement('button');
+    markAll.type = 'button';
+    markAll.className = 'op-notif-markall';
+    markAll.textContent = 'Marcar todas como leídas';
+    markAll.onclick = function () {
+      markAllNotificationsReadApi().then(function () {
+        _notifItems.forEach(function (n) { n.read = true; });
+        _notifUnread = 0;
+        updateNotifBadge();
+        renderNotifList();
+      }).catch(function () { toast('No se pudieron marcar como leídas', 'error'); });
+    };
+    head.appendChild(title);
+    head.appendChild(markAll);
+
+    const list = document.createElement('div');
+    list.className = 'op-notif-list';
+
+    panel.appendChild(head);
+    panel.appendChild(list);
+
+    const btn = _container.querySelector('.op-notifications-btn');
+    (btn && btn.parentNode ? btn.parentNode : _container).appendChild(panel);
+    _notifPanel = panel;
+
+    renderNotifList();
+    // Se refresca al abrir: el sondeo corre cada minuto y el usuario abre el panel
+    // justamente porque quiere ver lo último.
+    refreshNotifications(true);
+
+    document.addEventListener('mousedown', onNotifOutsideClick, true);
   }
 
   function openEditor(fileId, fileName) {
@@ -2421,6 +2713,28 @@
     selectedChip.hidden = true;
     userPanel.appendChild(selectedChip);
 
+    /** Campo de observaciones, idéntico en ambas pestañas. */
+    function buildNotesField() {
+      const wrap = document.createElement('label');
+      wrap.className = 'op-share-notes';
+      const caption = document.createElement('span');
+      caption.textContent = 'Observaciones (opcional)';
+      const area = document.createElement('textarea');
+      area.rows = 2;
+      area.maxLength = 500;
+      area.placeholder = 'Ej: revisar antes del viernes, versión final para firma…';
+      wrap.appendChild(caption);
+      wrap.appendChild(area);
+      return {
+        wrap: wrap,
+        value: function () {
+          const v = area.value.trim();
+          return v ? v : null;
+        },
+        clear: function () { area.value = ''; },
+      };
+    }
+
     function setSelectedUser(user) {
       selectedUser = user;
       if (!user) { selectedChip.hidden = true; return; }
@@ -2476,6 +2790,9 @@
     const userLevel = buildLevelSelect();
     userPanel.appendChild(userLevel);
 
+    const userNotes = buildNotesField();
+    userPanel.appendChild(userNotes.wrap);
+
     const userShareBtn = document.createElement('button');
     userShareBtn.type = 'button';
     userShareBtn.className = 'op-btn-primary';
@@ -2490,9 +2807,11 @@
         targetType: 'USER',
         targetUserId: selectedUser.userId,
         permissionLevel: userLevel.value,
+        notes: userNotes.value(),
       }).then(function () {
         toast('Compartido con ' + (selectedUser.displayName || selectedUser.userId), 'success');
         setSelectedUser(null);
+        userNotes.clear();
         reloadPerms();
       }).catch(function (err) {
         toast('Error al compartir: ' + err.message, 'error');
@@ -2501,53 +2820,123 @@
     userPanel.appendChild(userShareBtn);
 
     // ── Project panel ──
+    // Autocompletado en vez de un <select> con todos los proyectos: con veinte
+    // aplicativos consumidores la lista desplegable se vuelve inmanejable, y el
+    // usuario ya sabe el nombre del proyecto que busca.
     const projectPanel = document.createElement('div');
     projectPanel.className = 'op-share-panel';
     projectPanel.style.display = 'none';
-    const projectSelect = document.createElement('select');
-    projectSelect.className = 'op-modal-input op-share-level';
-    projectSelect.innerHTML = '<option value="">Cargando proyectos…</option>';
-    projectPanel.appendChild(projectSelect);
 
-    listProjectsApi().then(function (projects) {
-      projectSelect.innerHTML = '';
-      if (projects.length === 0) {
-        projectSelect.innerHTML = '<option value="">No hay proyectos disponibles</option>';
+    let selectedProject = null;
+
+    const projectChip = document.createElement('div');
+    projectChip.className = 'op-share-chip';
+    projectChip.hidden = true;
+    projectPanel.appendChild(projectChip);
+
+    const projectInput = document.createElement('input');
+    projectInput.type = 'text';
+    projectInput.className = 'op-modal-input';
+    projectInput.placeholder = 'Buscá el proyecto por nombre…';
+    projectPanel.appendChild(projectInput);
+
+    const projectResults = document.createElement('div');
+    projectResults.className = 'op-share-results';
+    projectResults.hidden = true;
+    projectPanel.appendChild(projectResults);
+
+    /** ProjectResponse expone projectName, no name. */
+    function projectLabel(p) {
+      return p.projectName || ('Proyecto #' + p.id);
+    }
+
+    function setSelectedProject(project) {
+      selectedProject = project;
+      if (!project) { projectChip.hidden = true; return; }
+      projectChip.hidden = false;
+      projectChip.innerHTML = '';
+      const label = document.createElement('span');
+      label.textContent = projectLabel(project) + ' · ID ' + project.id;
+      const clear = document.createElement('button');
+      clear.type = 'button';
+      clear.className = 'op-share-chip-clear';
+      clear.innerHTML = ICONS.close;
+      clear.onclick = function () { setSelectedProject(null); projectInput.value = ''; };
+      projectChip.appendChild(label);
+      projectChip.appendChild(clear);
+      projectInput.value = '';
+      projectResults.hidden = true;
+    }
+
+    function renderProjectResults(projects) {
+      projectResults.innerHTML = '';
+      if (projects.length === 0) { projectResults.hidden = true; return; }
+      projects.forEach(function (p) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'op-share-result';
+        item.innerHTML = '<strong>' + escapeHtml(projectLabel(p)) + '</strong><span>ID ' + p.id + '</span>';
+        item.onclick = function () { setSelectedProject(p); };
+        projectResults.appendChild(item);
+      });
+      projectResults.hidden = false;
+    }
+
+    projectInput.onfocus = function () {
+      if (!projectInput.value.trim()) {
+        listProjectsApi().then(renderProjectResults).catch(function () { projectResults.hidden = true; });
+      }
+    };
+
+    let projectSearchTimer = null;
+    projectInput.oninput = function () {
+      clearTimeout(projectSearchTimer);
+      const term = projectInput.value.trim();
+      if (!term) {
+        listProjectsApi().then(renderProjectResults).catch(function () { projectResults.hidden = true; });
         return;
       }
-      const defaultOpt = document.createElement('option');
-      defaultOpt.value = '';
-      defaultOpt.textContent = '-- Seleccioná un proyecto --';
-      projectSelect.appendChild(defaultOpt);
-      projects.forEach(function (p) {
-        const opt = document.createElement('option');
-        opt.value = p.id;
-        opt.textContent = (p.name || ('Proyecto #' + p.id)) + ' (ID: ' + p.id + ')';
-        projectSelect.appendChild(opt);
-      });
-    }).catch(function () {
-      projectSelect.innerHTML = '<option value="">Error al cargar proyectos</option>';
-    });
+      projectSearchTimer = setTimeout(function () {
+        // Si la búsqueda del servidor falla, se filtra sobre la lista completa: es
+        // preferible un resultado aproximado a dejar el campo mudo.
+        searchProjectsApi(term)
+          .then(renderProjectResults)
+          .catch(function () {
+            listProjectsApi().then(function (all) {
+              const needle = term.toLowerCase();
+              renderProjectResults(all.filter(function (p) {
+                return projectLabel(p).toLowerCase().indexOf(needle) !== -1;
+              }));
+            }).catch(function () { projectResults.hidden = true; });
+          });
+      }, 300);
+    };
 
     const projectLevel = buildLevelSelect();
     projectPanel.appendChild(projectLevel);
+
+    const projectNotes = buildNotesField();
+    projectPanel.appendChild(projectNotes.wrap);
+
     const projectShareBtn = document.createElement('button');
     projectShareBtn.type = 'button';
     projectShareBtn.className = 'op-btn-primary';
     projectShareBtn.style.width = '100%';
     projectShareBtn.textContent = 'Compartir con proyecto';
     projectShareBtn.onclick = function () {
-      const projectId = parseInt(projectSelect.value, 10);
-      if (!projectId) { toast('Elegí un proyecto válido de la lista', 'error'); return; }
+      if (!selectedProject) { toast('Elegí un proyecto de la lista', 'error'); return; }
       projectShareBtn.disabled = true;
       shareResourceApi({
         resourceType: resourceType,
         resourceId: resourceId,
         targetType: 'PROJECT',
-        targetApiKeyId: projectId,
+        targetApiKeyId: selectedProject.id,
         permissionLevel: projectLevel.value,
+        notes: projectNotes.value(),
       }).then(function () {
-        toast('Compartido con el proyecto', 'success');
+        toast('Compartido con ' + projectLabel(selectedProject), 'success');
+        setSelectedProject(null);
+        projectNotes.clear();
         reloadPerms();
       }).catch(function (err) {
         toast('Error al compartir: ' + err.message, 'error');
@@ -2597,6 +2986,15 @@
           const info = document.createElement('span');
           info.className = 'op-share-perm-info';
           info.innerHTML = '<strong>' + escapeHtml(who) + '</strong>';
+          // La observación explica POR QUÉ se compartió, que es lo que se olvida
+          // primero. Mostrarla acá evita tener que reconstruirlo de memoria.
+          if (p.notes) {
+            const note = document.createElement('em');
+            note.className = 'op-share-perm-note';
+            note.textContent = p.notes;
+            note.title = p.notes;
+            info.appendChild(note);
+          }
 
           const actionsWrap = document.createElement('div');
           actionsWrap.style.display = 'flex';
@@ -4080,6 +4478,34 @@
     from.textContent = 'Compartido por: ' + (resource.sharedByName || resource.sharedByUserId || '—');
     card.appendChild(from);
 
+    // Cuándo llegó: sin esto, veinte recursos compartidos son indistinguibles entre sí.
+    if (resource.createdAt) {
+      const when = document.createElement('div');
+      when.className = 'op-withme-when';
+      when.textContent = 'Compartido: ' + formatDate(resource.createdAt);
+      card.appendChild(when);
+    }
+
+    // De qué proyecto viene. Relevante en compartición cross-project, donde el
+    // recurso pertenece a un aplicativo distinto del que estoy usando.
+    if (resource.sourceProjectName) {
+      const project = document.createElement('div');
+      project.className = 'op-withme-project';
+      project.textContent = resource.sourceProjectName;
+      project.title = 'Proyecto de origen: ' + resource.sourceProjectName;
+      card.appendChild(project);
+    }
+
+    // La observación de quien compartió. Se recorta a dos líneas y queda completa
+    // en el title: una nota larga no debe deformar la grilla de tarjetas.
+    if (resource.notes) {
+      const note = document.createElement('div');
+      note.className = 'op-withme-note';
+      note.textContent = resource.notes;
+      note.title = resource.notes;
+      card.appendChild(note);
+    }
+
     // Files open in the editor. Cross-project resources may not resolve (the editor is scoped to the
     // caller's project); that surfaces as a toast from openEditor, which is acceptable for now.
     if (resource.resourceType === 'FILE') {
@@ -4292,6 +4718,7 @@
             '<button type="button" class="op-view-btn op-active" data-mode="grid" aria-label="Vista de cuadrícula">' + ICONS.grid + '</button>' +
             '<button type="button" class="op-view-btn" data-mode="list" aria-label="Vista de lista">' + ICONS.list + '</button>' +
           '</div>' +
+          '<button type="button" class="op-notifications-btn" aria-label="Notificaciones" title="Notificaciones">' + ICONS.bell + '</button>' +
           '<button type="button" class="op-macros-help-btn" aria-label="Ayuda de macros" title="Ayuda de macros: convertir desde Excel VBA">?</button>' +
           '<button type="button" class="op-refresh-btn" aria-label="Actualizar" title="Actualizar">' + ICONS.refresh + '</button>' +
           '<button type="button" class="op-theme-toggle" aria-label="Cambiar tema claro/oscuro" title="Cambiar tema">' + ICONS.moon + '</button>' +
@@ -4468,6 +4895,9 @@
     // integración con la barra recortada), el widget sigue funcionando igual.
     const macrosHelpBtn = _container.querySelector('.op-macros-help-btn');
     if (macrosHelpBtn) macrosHelpBtn.onclick = showMacrosHelp;
+
+    const notifBtn = _container.querySelector('.op-notifications-btn');
+    if (notifBtn) notifBtn.onclick = toggleNotifPanel;
     _newBtn = _container.querySelector('.op-new-btn');
     _newFolderBtn = _container.querySelector('.op-new-folder-btn');
     _breadcrumbBar = _container.querySelector('.op-breadcrumb');
@@ -4606,6 +5036,7 @@
     updateSelectToggleLabel();
     applyTheme();
     loadFiles();
+    startNotificationPolling();
   }
 
   // ── Public API (window.OfficePlatform) ───────────────────────────────────
