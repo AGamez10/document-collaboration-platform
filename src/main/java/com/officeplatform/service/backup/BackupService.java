@@ -15,6 +15,9 @@ public interface BackupService {
 
     InputStream getBackupStream(String fileName);
 
+    /** Tamano en bytes del paquete, para anunciar Content-Length en la descarga. */
+    long getBackupSize(String fileName);
+
     void deleteBackup(String fileName);
 
     BackupConfigResponse getConfig();

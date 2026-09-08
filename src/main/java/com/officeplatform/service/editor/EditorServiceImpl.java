@@ -340,8 +340,11 @@ public class EditorServiceImpl implements EditorService {
             return "word";
         }
         return switch (extension.toLowerCase()) {
-            case "xls", "xlsx", "ods", "csv" -> "cell";
-            case "ppt", "pptx", "odp" -> "slide";
+            // Los formatos con macros abren con el mismo editor que su equivalente sin macros:
+            // el Document Server distingue por documentType, no por la presencia del proyecto VBA.
+            case "xls", "xlsx", "xlsm", "xltm", "xlsb", "ods", "csv" -> "cell";
+            case "ppt", "pptx", "pptm", "potm", "odp" -> "slide";
+            case "doc", "docx", "docm", "dotm", "odt" -> "word";
             default -> "word";
         };
     }

@@ -35,6 +35,7 @@ import com.officeplatform.security.model.ApiKeyPrincipal;
 import com.officeplatform.service.file.FileService;
 import com.officeplatform.service.folder.FolderService;
 import com.officeplatform.service.share.ShareService;
+import com.officeplatform.util.MimeUtils;
 
 @RestController
 @RequestMapping("/api/files")
@@ -279,14 +280,32 @@ public class FileController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    @GetMapping("/download/{uuid}")
-    public ResponseEntity<InputStreamResource> downloadByUuid(@PathVariable String uuid) {
+    /**
+     * Descarga pública por UUID, con un segmento final opcional para el nombre del archivo.
+     *
+     * <p>Ese segundo segmento es decorativo y no participa de la búsqueda: el UUID sigue siendo lo
+     * único que identifica el archivo. Existe porque Excel de escritorio decide cómo interpretar lo
+     * que descarga mirando la extensión del último tramo de la URL, y una ruta terminada en el UUID
+     * le llega sin extensión. Aceptar {@code /download/{uuid}/plan.xlsm} deja la URL terminada en
+     * {@code .xlsm} sin abrir ninguna vía nueva de acceso, ya que el nombre no se usa para resolver
+     * nada. La forma de un solo segmento se mantiene porque es la que Document Server ya usa.
+     *
+     * @param uuid identificador del archivo, el único dato con el que se resuelve la descarga
+     * @param fileName nombre decorativo para que la URL termine en la extensión real; se ignora
+     */
+    @GetMapping({"/download/{uuid}", "/download/{uuid}/{fileName}"})
+    public ResponseEntity<InputStreamResource> downloadByUuid(
+            @PathVariable String uuid,
+            @PathVariable(required = false) String fileName) {
         FileEntity fileEntity = fileService.getFileByUuid(uuid);
         InputStream inputStream = fileService.downloadByUuid(uuid);
+        // El tipo se deriva de la extensión original: un .xlsm servido con el MIME genérico de
+        // Excel llega a Excel de escritorio como un .xls antiguo y pierde el proyecto de macros.
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "inline; filename=\"" + fileEntity.getOriginalFileName() + "\"")
-                .contentType(MediaType.parseMediaType(fileEntity.getMimeType()))
+                .contentType(MediaType.parseMediaType(MimeUtils.contentTypeForFileName(
+                        fileEntity.getOriginalFileName(), fileEntity.getMimeType())))
                 .body(new InputStreamResource(inputStream));
     }
 
@@ -313,7 +332,8 @@ public class FileController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename=\"" + fileEntity.getOriginalFileName() + "\"")
-                .contentType(MediaType.parseMediaType(fileEntity.getMimeType()))
+                .contentType(MediaType.parseMediaType(MimeUtils.contentTypeForFileName(
+                        fileEntity.getOriginalFileName(), fileEntity.getMimeType())))
                 .body(new InputStreamResource(inputStream));
     }
 

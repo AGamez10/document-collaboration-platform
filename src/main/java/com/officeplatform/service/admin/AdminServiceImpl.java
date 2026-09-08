@@ -577,6 +577,11 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
+    public long getBackupSize(String fileName) {
+        return backupService.getBackupSize(fileName);
+    }
+
+    @Override
     public void deleteBackup(String fileName) {
         backupService.deleteBackup(fileName);
     }

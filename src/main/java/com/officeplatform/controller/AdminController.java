@@ -305,15 +305,28 @@ public class AdminController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
+    /**
+     * Entrega el paquete de respaldo.
+     *
+     * <p>El panel lo pide por {@code fetch} con la cabecera Basic, porque el endpoint exige
+     * ROLE_ADMIN y un enlace nativo del navegador viaja sin credenciales: Spring respondía 401 y
+     * Chrome cancelaba la descarga sin explicar por qué. Se anuncia el tipo real y el tamaño para
+     * que la barra de progreso funcione; si el archivo no se puede medir, se omite el largo antes
+     * que fallar la descarga entera.
+     */
     @GetMapping("/backups/{fileName}/download")
     public ResponseEntity<Resource> downloadBackup(@PathVariable String fileName) {
         InputStream stream = adminService.getBackupStream(fileName);
         InputStreamResource resource = new InputStreamResource(stream);
+        long size = adminService.getBackupSize(fileName);
 
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
-                .body(resource);
+                .contentType(MediaType.parseMediaType("application/zip"));
+        if (size >= 0) {
+            builder.contentLength(size);
+        }
+        return builder.body(resource);
     }
 
     /**

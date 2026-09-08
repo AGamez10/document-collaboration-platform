@@ -61,6 +61,9 @@ public interface AdminService {
 
     InputStream getBackupStream(String fileName);
 
+    /** Tamano en bytes del paquete, o -1 si no se pudo medir. */
+    long getBackupSize(String fileName);
+
     void deleteBackup(String fileName);
 
     com.officeplatform.dto.response.BackupRestoreResponse restoreBackup(String fileName);

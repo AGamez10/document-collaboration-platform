@@ -49,7 +49,16 @@
     return;
   }
 
-  const ALLOWED_EXTENSIONS = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt', 'odt', 'ods', 'odp', 'pdf'];
+  // Incluye los formatos con macros y sus plantillas. El widget rechaza en el navegador
+  // antes de enviar la petición, así que una extensión ausente acá se traduce en un toast
+  // de "Tipo de archivo no permitido" que nunca llega al backend: esta lista y la de
+  // allowed-mime-types del servidor tienen que moverse juntas.
+  const ALLOWED_EXTENSIONS = [
+    'docx', 'doc', 'docm', 'dotm',
+    'xlsx', 'xls', 'xlsm', 'xltm', 'xlsb',
+    'pptx', 'ppt', 'pptm', 'potm',
+    'odt', 'ods', 'odp', 'pdf',
+  ];
   const ACCEPT_ATTR = ALLOWED_EXTENSIONS.map(function (e) { return '.' + e; }).join(',');
 
   // ── CSS ─────────────────────────────────────────────────────────────────
@@ -1130,6 +1139,62 @@
     .op-editor-fullscreen svg { width: 18px; height: 18px; }
     .op-editor-fullscreen:hover { background: var(--op-bg-hover); color: var(--op-text); }
 
+    /* Excel de escritorio y asistente de macros. Verde de Excel para que el botón se lea como
+       "salir a la otra aplicación" y no se confunda con las acciones del editor. */
+    .op-editor-desktop-btn {
+      background: transparent; color: #107c41;
+      border: 1px solid #107c41; border-radius: 8px;
+      padding: 6px 12px; font-family: inherit; font-size: 13px; font-weight: 600;
+      cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+      white-space: nowrap; transition: all .15s ease;
+    }
+    .op-editor-desktop-btn svg { width: 16px; height: 16px; }
+    .op-editor-desktop-btn:hover { background: #107c41; color: #fff; }
+    .op-editor-macros-btn {
+      background: transparent; border: 0; cursor: pointer;
+      color: var(--op-text-dim); padding: 6px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s ease;
+    }
+    .op-editor-macros-btn svg { width: 18px; height: 18px; }
+    .op-editor-macros-btn:hover { background: var(--op-bg-hover); color: var(--op-text); }
+
+    /* Aviso de macros: informativo, descartable y fuera del flujo del documento. */
+    .op-editor-macrobar {
+      flex-shrink: 0;
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 20px;
+      background: rgba(16, 124, 65, .09);
+      border-bottom: 1px solid rgba(16, 124, 65, .28);
+      font-size: 12.5px; line-height: 1.45; color: var(--op-text);
+    }
+    .op-editor-macrobar-icon { display: flex; flex: 0 0 auto; color: #107c41; }
+    .op-editor-macrobar-icon svg { width: 16px; height: 16px; }
+    .op-editor-macrobar-text { flex: 1 1 auto; min-width: 0; }
+    .op-editor-macrobar-action {
+      flex: 0 0 auto;
+      background: #107c41; color: #fff; border: 0; border-radius: 7px;
+      padding: 6px 12px; font-family: inherit; font-size: 12.5px; font-weight: 600;
+      cursor: pointer; white-space: nowrap; transition: opacity .15s ease;
+    }
+    .op-editor-macrobar-action:hover { opacity: .88; }
+    .op-editor-macrobar-close {
+      flex: 0 0 auto;
+      background: transparent; border: 0; cursor: pointer; padding: 4px;
+      color: var(--op-text-dim); border-radius: 6px; display: flex;
+    }
+    .op-editor-macrobar-close svg { width: 15px; height: 15px; }
+    .op-editor-macrobar-close:hover { background: var(--op-bg-hover); color: var(--op-text); }
+    /* Maximizado, el cuerpo tiene height:100% para arrastrar al iframe. Con la barra de aviso
+       encima eso suma más de una pantalla y el editor queda cortado abajo: acá vuelve a
+       dimensionarse por flex, que ya reparte el espacio restante. */
+    .op-editor-modal.is-maximized:has(.op-editor-macrobar) .op-editor-body { height: auto; }
+    @media (max-width: 720px) {
+      .op-editor-desktop-btn span { display: none; }
+      .op-editor-macrobar-text { font-size: 12px; }
+      .op-editor-macrobar-action { display: none; }
+    }
+
     .op-editor-header {
       display: flex;
       align-items: center;
@@ -1288,6 +1353,9 @@
     share: icon('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>'),
     lock: icon('<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>'),
     users: icon('<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>'),
+    // Hoja de cálculo: una grilla, que es lo que el usuario asocia con Excel.
+    excel: icon('<rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/>'),
+    code: icon('<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>'),
   };
 
   // ── Small helpers ────────────────────────────────────────────────────────
@@ -1321,9 +1389,14 @@
   function getFileKind(file) {
     const mime = (file.mimeType || '').toLowerCase();
     const ext = extensionOf(file.originalFileName);
-    if (mime.indexOf('wordprocessingml') >= 0 || mime.indexOf('msword') >= 0 || ['doc', 'docx', 'odt'].indexOf(ext) >= 0) return 'word';
-    if (mime.indexOf('spreadsheetml') >= 0 || mime.indexOf('ms-excel') >= 0 || ['xls', 'xlsx', 'ods'].indexOf(ext) >= 0) return 'excel';
-    if (mime.indexOf('presentationml') >= 0 || mime.indexOf('ms-powerpoint') >= 0 || ['ppt', 'pptx', 'odp'].indexOf(ext) >= 0) return 'powerpoint';
+    // El MIME de macros lleva el nombre del producto ('ms-word.', 'ms-excel.', 'ms-powerpoint.'),
+    // así que cada familia lo reconoce por su propio prefijo. El comodín 'macroenabled' queda
+    // como último recurso, después de Word y PowerPoint: si se evaluara antes, un .pptm caería
+    // en la rama de Excel y se mostraría con el icono equivocado.
+    if (mime.indexOf('wordprocessingml') >= 0 || mime.indexOf('msword') >= 0 || mime.indexOf('ms-word') >= 0 || ['doc', 'docx', 'docm', 'dotm', 'odt'].indexOf(ext) >= 0) return 'word';
+    if (mime.indexOf('spreadsheetml') >= 0 || mime.indexOf('ms-excel') >= 0 || ['xls', 'xlsx', 'xlsm', 'xltm', 'xlsb', 'ods'].indexOf(ext) >= 0) return 'excel';
+    if (mime.indexOf('presentationml') >= 0 || mime.indexOf('ms-powerpoint') >= 0 || ['ppt', 'pptx', 'pptm', 'potm', 'odp'].indexOf(ext) >= 0) return 'powerpoint';
+    if (mime.indexOf('macroenabled') >= 0) return 'excel';
     if (mime.indexOf('pdf') >= 0 || ext === 'pdf') return 'pdf';
     return 'other';
   }
@@ -1786,6 +1859,38 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
   }
 
+  // ── Excel de escritorio ──────────────────────────────────────────────────
+  // OnlyOffice conserva intacto el vbaProject.bin de un .xlsm, pero no ejecuta VBA en el
+  // navegador: el motor web es JavaScript. Las macros existen y siguen ahí, solo que corren
+  // en Excel de escritorio. Estas funciones abren esa puerta en vez de dejar al usuario
+  // frente a una ventana de macros vacía sin explicación.
+
+  const EXCEL_EXTENSIONS = ['xlsm', 'xlsx', 'xls', 'xltm', 'xlsb'];
+
+  function isExcelFile(fileName) {
+    return EXCEL_EXTENSIONS.indexOf(extensionOf(fileName || '')) >= 0;
+  }
+
+  /** Solo .xlsm lleva macros VBA; .xltm y .xlsb también, pero el aviso apunta al caso real. */
+  function isMacroEnabled(fileName) {
+    return extensionOf(fileName || '') === 'xlsm';
+  }
+
+  /**
+   * Baja el archivo para que se abra en Excel de escritorio.
+   *
+   * <p>Antes esto lanzaba el protocolo {@code ms-excel:}, pero sobre HTTP Chrome y Windows lo
+   * bloquean sin avisar: no hay error ni evento, la pantalla se queda quieta y recién a los dos
+   * segundos aparecía un aviso ofreciendo descargar. Eran dos pasos y una espera para algo que el
+   * usuario pidió una sola vez. Descargar directo es un clic, funciona siempre, y el archivo abre
+   * en Excel con sus macros y sus rutas de red intactas.
+   */
+  function openInDesktopExcel(file) {
+    downloadSingle(file.id, file.originalFileName);
+    toast('Descargando ' + file.originalFileName + '. Abrí la descarga para editarlo en Excel '
+      + 'con todas tus macros y rutas de red.', 'success');
+  }
+
   async function downloadSingle(id, filename) {
     try {
       const buf = await downloadFileBytes(id);
@@ -1871,8 +1976,11 @@
   function resolveDocType(fileType) {
     if (!fileType) return 'word';
     const t = fileType.toLowerCase();
-    if (['xlsx', 'xls', 'ods', 'csv'].indexOf(t) >= 0) return 'cell';
-    if (['pptx', 'ppt', 'odp'].indexOf(t) >= 0) return 'slide';
+    // Debe coincidir con resolveDocumentType de EditorServiceImpl: el backend firma el config
+    // con su propio valor y el Document Server rechaza el documento si los dos no concuerdan.
+    if (['xlsx', 'xls', 'xlsm', 'xltm', 'xlsb', 'ods', 'csv'].indexOf(t) >= 0) return 'cell';
+    if (['pptx', 'ppt', 'pptm', 'potm', 'odp'].indexOf(t) >= 0) return 'slide';
+    if (['docx', 'doc', 'docm', 'dotm', 'odt'].indexOf(t) >= 0) return 'word';
     return 'word';
   }
 
@@ -1882,6 +1990,8 @@
   let _currentEditorFileId = null;
   let _currentEditorDocKey = null;
   let _editorDirty = false;
+  // Aviso de Excel de escritorio: una vez descartado, no vuelve a mostrarse en esta sesión.
+  let _desktopNoticeDismissed = false;
 
   function notifyEditorClosed(fileId, documentKey) {
     apiFetch('/api/editor/' + fileId + '/close?key=' + encodeURIComponent(documentKey), { method: 'POST' }).catch(function () {});
@@ -2379,8 +2489,32 @@
     document.addEventListener('mousedown', onNotifOutsideClick, true);
   }
 
+  /**
+   * Abre el asistente de macros desde el editor.
+   *
+   * <p>En pantalla completa nativa el navegador solo pinta el elemento en fullscreen y sus
+   * descendientes. El modal cuelga de {@code <body>}, así que se vería un clic sin respuesta:
+   * se sale de fullscreen primero. El modo maximizado por CSS no tiene ese problema.
+   */
+  function showMacrosHelpFromEditor() {
+    if (isNativeFullscreen() && document.exitFullscreen) {
+      document.exitFullscreen().catch(function () {});
+    }
+    showMacrosHelp();
+  }
+
   function openEditor(fileId, fileName) {
     closeEditor();
+
+    // Un .xlsm abre con sus macros preservadas pero inertes: el motor web es JavaScript y no
+    // ejecuta VBA. El editor lo dice de entrada y ofrece las dos salidas reales — Excel de
+    // escritorio para correrlas tal cual, o el asistente para traducirlas.
+    const excelFile = isExcelFile(fileName);
+    const macroFile = isMacroEnabled(fileName);
+    // El aviso aparece en cualquier planilla, porque los hipervínculos a rutas de red son tan
+    // comunes en las que no tienen macros. Se muestra hasta que la persona lo descarta una vez:
+    // repetirlo en cada documento sería ruido, y el botón del header queda igual a la vista.
+    const showDesktopNotice = excelFile && !_desktopNoticeDismissed;
 
     _editorOverlay = document.createElement('div');
     _editorOverlay.className = 'op-editor-overlay';
@@ -2391,11 +2525,39 @@
           '<span class="op-editor-status" data-state="idle">Cargando…</span>' +
           '<span class="op-editor-collab" hidden></span>' +
           '<div class="op-editor-header-actions">' +
+            (excelFile
+              ? '<button type="button" class="op-editor-desktop-btn" ' +
+                'title="Abrir en Microsoft Excel para ejecutar macros VBA nativas y abrir rutas de red (\\\\SERVER…)">' +
+                ICONS.excel + '<span>Abrir en Excel local</span></button>'
+              : '') +
+            (macroFile
+              ? '<button type="button" class="op-editor-macros-btn" aria-label="Asistente de macros" ' +
+                'title="Asistente de macros: convertir VBA a JavaScript">' + ICONS.code + '</button>'
+              : '') +
             '<button type="button" class="op-editor-filemanager-btn">' + ICONS.folder + '<span>Gestor de archivos</span></button>' +
             '<button type="button" class="op-editor-fullscreen" aria-label="Pantalla completa" title="Pantalla completa">' + ICONS.maximize + '</button>' +
             '<button type="button" class="op-editor-close" aria-label="Cerrar">' + ICONS.close + '</button>' +
           '</div>' +
         '</div>' +
+        (showDesktopNotice
+          ? '<div class="op-editor-macrobar">' +
+              '<span class="op-editor-macrobar-icon">' + (macroFile ? ICONS.code : ICONS.excel) + '</span>' +
+              '<span class="op-editor-macrobar-text">' +
+                (macroFile
+                  ? '<strong>Archivo con macros VBA.</strong> Se conservan intactas, pero el navegador ' +
+                    'no ejecuta VBA. Usá <strong>Abrir en Excel local</strong> para correrlas y para ' +
+                    'entrar a las rutas de red (\\\\SERVER…), que Windows abre de forma nativa. ' +
+                    'Para ejecutarlas acá en la web, convertilas con el asistente.'
+                  : '<strong>¿El documento tiene enlaces a rutas de red?</strong> El navegador bloquea ' +
+                    '\\\\SERVER… por seguridad y no hay forma de evitarlo desde la web. Usá ' +
+                    '<strong>Abrir en Excel local</strong>: ahí Windows los abre de forma nativa.') +
+              '</span>' +
+              (macroFile
+                ? '<button type="button" class="op-editor-macrobar-action">Asistente de macros</button>'
+                : '') +
+              '<button type="button" class="op-editor-macrobar-close" aria-label="Ocultar aviso">' + ICONS.close + '</button>' +
+            '</div>'
+          : '') +
         '<div class="op-editor-body">' +
           '<div id="op-editor-container"></div>' +
           '<div class="op-editor-loading">Cargando editor…</div>' +
@@ -2405,6 +2567,29 @@
     document.body.appendChild(_editorOverlay);
     _editorOverlay.querySelector('.op-editor-close').onclick = attemptCloseEditor;
     _editorOverlay.querySelector('.op-editor-fullscreen').onclick = toggleEditorFullscreen;
+
+    // Los botones de Excel y macros solo existen para los formatos que los necesitan, así que
+    // cada enlace se hace bajo guarda: sin esto, abrir un .docx tiraría en un null.
+    const desktopBtn = _editorOverlay.querySelector('.op-editor-desktop-btn');
+    if (desktopBtn) {
+      desktopBtn.onclick = function () {
+        openInDesktopExcel({ id: fileId, originalFileName: fileName });
+      };
+    }
+    const macrosBtn = _editorOverlay.querySelector('.op-editor-macros-btn');
+    if (macrosBtn) macrosBtn.onclick = showMacrosHelpFromEditor;
+    const macrobarAction = _editorOverlay.querySelector('.op-editor-macrobar-action');
+    if (macrobarAction) macrobarAction.onclick = showMacrosHelpFromEditor;
+    const macrobarClose = _editorOverlay.querySelector('.op-editor-macrobar-close');
+    if (macrobarClose) {
+      macrobarClose.onclick = function () {
+        // Se recuerda en memoria y no en localStorage: el aviso vuelve a aparecer en la próxima
+        // visita, que es cuando otra persona puede estar usando el mismo equipo de planta.
+        _desktopNoticeDismissed = true;
+        const bar = _editorOverlay && _editorOverlay.querySelector('.op-editor-macrobar');
+        if (bar) bar.remove();
+      };
+    }
     // Click on the dark backdrop (outside the modal) also closes, with the same unsaved-changes guard.
     _editorOverlay.onclick = function (e) { if (e.target === _editorOverlay) attemptCloseEditor(); };
     buildFileManagerUI(_editorOverlay);
@@ -2675,6 +2860,17 @@
     copyPrompt.textContent = 'Copiar prompt al portapapeles';
     copyPrompt.onclick = function () { copyToClipboard(MACRO_PROMPT, copyPrompt); };
     panelIA.appendChild(copyPrompt);
+
+    // El síntoma que trae a la gente acá es abrir un .xlsm y encontrar la ventana de macros
+    // vacía. Decir dónde va el resultado, y que las macros originales no se perdieron, evita
+    // que lo lean como un archivo roto.
+    const route = document.createElement('p');
+    route.className = 'op-mh-intro';
+    route.innerHTML = 'Pegá el resultado en el editor: pestaña <strong>Vista</strong> → '
+      + '<strong>Macros</strong>, y ejecutalo desde ahí. Tus macros VBA originales siguen '
+      + 'intactas dentro del archivo: para correrlas tal cual, o para entrar a rutas de red '
+      + '(\\\\SERVER…) que el navegador bloquea, usá <strong>Abrir en Excel local</strong>.';
+    panelIA.appendChild(route);
 
     const warn = document.createElement('p');
     warn.className = 'op-mh-warn';
@@ -3594,6 +3790,13 @@
       menuItem('Renombrar', ICONS.rename, false, function () { handleRename(file); }),
       menuItem('Mover', ICONS.move, false, function () { showMovePicker(file); }),
     ];
+    // Las macros VBA solo corren en Excel de escritorio, así que la puerta a esa app va donde
+    // el usuario ya está mirando el archivo, no escondida dentro del editor.
+    if (isExcelFile(file.originalFileName)) {
+      items.splice(2, 0, menuItem('Abrir en Excel de escritorio', ICONS.excel, false, function () {
+        openInDesktopExcel(file);
+      }));
+    }
     if (state.section === 'files' || state.section === 'shared') {
       items.push(menuItem('Compartir', ICONS.share, false, function () { openShareModal('FILE', file.id, file.originalFileName); }));
     }

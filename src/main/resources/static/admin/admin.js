@@ -831,13 +831,45 @@
           '<td>' + formatDate(b.createdAt) + '</td>' +
           '<td style="text-align:right;">' +
             '<div style="display:flex;gap:6px;justify-content:flex-end;">' +
-              '<a href="/api/admin/backups/' + encodeURIComponent(b.fileName) + '/download" class="op-btn op-btn--sm op-btn--ghost" download>Descargar ZIP</a>' +
+              '<button type="button" class="op-btn op-btn--sm op-btn--ghost" data-download-backup="' + escapeHtml(b.fileName) + '">Descargar ZIP</button>' +
               '<button type="button" class="op-btn op-btn--sm op-btn--warning" data-restore-backup="' + escapeHtml(b.fileName) + '">Restaurar</button>' +
               '<button type="button" class="op-btn op-btn--sm op-btn--danger" data-delete-backup="' + escapeHtml(b.fileName) + '">Eliminar</button>' +
             '</div>' +
           '</td>' +
           '</tr>';
       }).join('');
+
+      // La descarga va por fetch y no por un <a href>: el endpoint exige ROLE_ADMIN y un enlace
+      // nativo viaja sin la cabecera Basic, así que Spring devolvía 401 y Chrome cancelaba la
+      // descarga con "el archivo no estaba disponible en el sitio", sin rastro del motivo real.
+      els.backupsTbody.querySelectorAll('[data-download-backup]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          const fn = btn.dataset.downloadBackup;
+          const label = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = 'Descargando…';
+          let url = null;
+          try {
+            const res = await api('/api/admin/backups/' + encodeURIComponent(fn) + '/download');
+            const blob = await res.blob();
+            url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fn;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          } catch (err) {
+            showToast('No se pudo descargar el respaldo: ' + err.message, true);
+          } finally {
+            // El Object URL se revoca con un respiro: revocarlo en el mismo tick puede
+            // adelantarse a que el navegador levante el blob y deja la descarga vacía.
+            if (url) setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+            btn.disabled = false;
+            btn.textContent = label;
+          }
+        });
+      });
 
       els.backupsTbody.querySelectorAll('[data-restore-backup]').forEach(function (btn) {
         btn.addEventListener('click', function () {

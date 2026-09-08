@@ -256,6 +256,20 @@ public class BackupServiceImpl implements BackupService {
     }
 
     @Override
+    public long getBackupSize(String fileName) {
+        validateFileName(fileName);
+        Path filePath = getResolvedDirectory().resolve(fileName).normalize();
+        try {
+            return Files.size(filePath);
+        } catch (IOException e) {
+            // Un tamano desconocido no justifica romper la descarga: se responde sin
+            // Content-Length y el navegador la baja igual, solo que sin barra de progreso.
+            log.warn("No se pudo medir la copia de seguridad {}: {}", fileName, e.getMessage());
+            return -1L;
+        }
+    }
+
+    @Override
     public void deleteBackup(String fileName) {
         validateFileName(fileName);
         Path filePath = getResolvedDirectory().resolve(fileName).normalize();
