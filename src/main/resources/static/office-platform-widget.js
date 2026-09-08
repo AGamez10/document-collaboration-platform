@@ -1097,6 +1097,39 @@
       flex-direction: column;
       overflow: hidden;
     }
+    /* Maximizado: el modal ocupa la ventana entera. Se hace por clase y no solo con la
+       Fullscreen API porque el navegador puede bloquearla (iframe sin allow="fullscreen",
+       o gesto no considerado de usuario), y en ese caso el usuario igual debe poder trabajar
+       a pantalla completa. La API nativa se intenta encima, como mejora. */
+    .op-editor-overlay.is-maximized { padding: 0 !important; margin: 0 !important; }
+    .op-editor-modal.is-maximized {
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: 100% !important;
+      max-height: 100% !important;
+      border-radius: 0 !important;
+      border: none !important;
+      margin: 0 !important;
+      box-shadow: none !important;
+    }
+    /* El contenedor del editor y su iframe siguen al modal: sin esto el iframe conserva
+       su alto anterior y queda una franja vacía abajo. */
+    .op-editor-modal.is-maximized .op-editor-body,
+    .op-editor-modal.is-maximized #op-editor-container { height: 100%; }
+    .op-editor-modal.is-maximized #op-editor-container iframe {
+      width: 100% !important;
+      height: 100% !important;
+      border: 0 !important;
+    }
+    .op-editor-fullscreen {
+      background: transparent; border: 0; cursor: pointer;
+      color: var(--op-text-dim); padding: 6px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s ease;
+    }
+    .op-editor-fullscreen svg { width: 18px; height: 18px; }
+    .op-editor-fullscreen:hover { background: var(--op-bg-hover); color: var(--op-text); }
+
     .op-editor-header {
       display: flex;
       align-items: center;
@@ -1247,6 +1280,8 @@
     restore: icon('<polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>'),
     rename: icon('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>'),
     move: icon('<polyline points="16 3 21 3 21 8"/><line x1="21" y1="3" x2="14" y2="10"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/>'),
+    maximize: icon('<polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>'),
+    minimize: icon('<polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/>'),
     bell: icon('<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>'),
     open: icon('<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>'),
     folder: icon('<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>'),
@@ -1854,6 +1889,12 @@
 
   function closeEditor() {
     stopIdleWatch();
+    if (_editorMaximized) {
+      _editorMaximized = false;
+      if (isNativeFullscreen() && document.exitFullscreen) {
+        document.exitFullscreen().catch(function () {});
+      }
+    }
     if (_docsAPI) { try { _docsAPI.destroyEditor(); } catch (_) {} _docsAPI = null; }
     if (_editorOverlay) { _editorOverlay.remove(); _editorOverlay = null; }
     const prev = document.getElementById('op-oo-script');
@@ -1867,7 +1908,90 @@
   }
 
   // Closes the editor, confirming first if there are unsaved local edits.
+
+  // ── Pantalla completa del editor ──────────────────────────────────────────
+  // Dos mecanismos que se complementan: la clase CSS garantiza el 100% de la ventana
+  // siempre, y la Fullscreen API nativa se intenta encima para además ocultar la barra
+  // del navegador. Si la API está bloqueada por política de permisos, la clase sola
+  // deja al usuario trabajando a pantalla completa igual.
+  //
+  // Ninguno de los dos toca el iframe ni la instancia de DocsAPI: es un cambio de
+  // tamaño, así que la sesión de OnlyOffice sigue viva y sin recargar el documento.
+
+  let _editorMaximized = false;
+
+  function isNativeFullscreen() {
+    return !!(document.fullscreenElement || document.webkitFullscreenElement);
+  }
+
+  function updateFullscreenButton() {
+    if (!_editorOverlay) return;
+    const btn = _editorOverlay.querySelector('.op-editor-fullscreen');
+    if (!btn) return;
+    btn.innerHTML = _editorMaximized ? ICONS.minimize : ICONS.maximize;
+    btn.title = _editorMaximized ? 'Restaurar tamaño' : 'Pantalla completa';
+    btn.setAttribute('aria-label', btn.title);
+  }
+
+  function applyMaximizedState(on) {
+    if (!_editorOverlay) return;
+    const modal = _editorOverlay.querySelector('.op-editor-modal');
+    _editorMaximized = on;
+    _editorOverlay.classList.toggle('is-maximized', on);
+    if (modal) modal.classList.toggle('is-maximized', on);
+    updateFullscreenButton();
+  }
+
+  function toggleEditorFullscreen() {
+    if (!_editorOverlay) return;
+
+    if (_editorMaximized) {
+      applyMaximizedState(false);
+      if (isNativeFullscreen() && document.exitFullscreen) {
+        document.exitFullscreen().catch(function () {});
+      }
+      return;
+    }
+
+    applyMaximizedState(true);
+    // Se pide después de aplicar la clase: si el navegador la rechaza, el usuario ya
+    // está a pantalla completa dentro de la ventana y no percibe ningún fallo.
+    const el = _editorOverlay;
+    const request = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (request) {
+      try {
+        const result = request.call(el);
+        if (result && typeof result.catch === 'function') result.catch(function () {});
+      } catch (_) {}
+    }
+  }
+
+  // Salir de pantalla completa nativa (con ESC o con el gesto del navegador) debe dejar
+  // el modal en su tamaño original, no maximizado dentro de una ventana normal.
+  document.addEventListener('fullscreenchange', function () {
+    if (!_editorOverlay) return;
+    if (!isNativeFullscreen() && _editorMaximized) applyMaximizedState(false);
+  });
+
+  // ESC restaura el tamaño cuando el maximizado es solo por CSS (la Fullscreen API nativa
+  // la maneja el propio navegador y dispara fullscreenchange). Deliberadamente NO cierra el
+  // editor: ESC es un gesto de "salir de pantalla completa", y cerrar un documento con
+  // cambios sin guardar por esa tecla sería destructivo.
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    if (_editorOverlay && _editorMaximized && !isNativeFullscreen()) {
+      e.stopPropagation();
+      applyMaximizedState(false);
+    }
+  }, true);
+
   function attemptCloseEditor() {
+    // ESC estando maximizado restaura primero. Cerrar el documento de una sería
+    // destructivo para un gesto que el usuario asocia a "salir de pantalla completa".
+    if (_editorMaximized && !isNativeFullscreen()) {
+      applyMaximizedState(false);
+      return;
+    }
     if (_editorDirty && !window.confirm('Hay cambios sin guardar. ¿Cerrar el editor de todos modos?')) {
       return;
     }
@@ -2268,6 +2392,7 @@
           '<span class="op-editor-collab" hidden></span>' +
           '<div class="op-editor-header-actions">' +
             '<button type="button" class="op-editor-filemanager-btn">' + ICONS.folder + '<span>Gestor de archivos</span></button>' +
+            '<button type="button" class="op-editor-fullscreen" aria-label="Pantalla completa" title="Pantalla completa">' + ICONS.maximize + '</button>' +
             '<button type="button" class="op-editor-close" aria-label="Cerrar">' + ICONS.close + '</button>' +
           '</div>' +
         '</div>' +
@@ -2279,6 +2404,7 @@
 
     document.body.appendChild(_editorOverlay);
     _editorOverlay.querySelector('.op-editor-close').onclick = attemptCloseEditor;
+    _editorOverlay.querySelector('.op-editor-fullscreen').onclick = toggleEditorFullscreen;
     // Click on the dark backdrop (outside the modal) also closes, with the same unsaved-changes guard.
     _editorOverlay.onclick = function (e) { if (e.target === _editorOverlay) attemptCloseEditor(); };
     buildFileManagerUI(_editorOverlay);

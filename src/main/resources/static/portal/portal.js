@@ -31,6 +31,7 @@
 
     app: document.getElementById('op-portal-app'),
     username: document.getElementById('op-portal-username'),
+    avatar: document.getElementById('op-portal-avatar'),
     logout: document.getElementById('op-portal-logout'),
     widget: document.getElementById('office-platform'),
   };
@@ -162,13 +163,31 @@
     }
   });
 
+  /** Primer nombre, para saludar sin recitar el nombre completo. */
+  function firstName(name) {
+    if (!name) return '';
+    return String(name).trim().split(/\s+/)[0];
+  }
+
+  /** Iniciales para el avatar: una o dos letras, nunca más. */
+  function initials(name) {
+    if (!name) return '?';
+    var parts = String(name).trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return '?';
+    if (parts.length === 1) return parts[0].charAt(0);
+    return parts[0].charAt(0) + parts[1].charAt(0);
+  }
+
   // ── Gestor documental ─────────────────────────────────────────────────────
 
   function startApp() {
     els.login.hidden = true;
     els.change.hidden = true;
     els.app.hidden = false;
-    els.username.textContent = state.displayName;
+    // Saludo por nombre: el portal lo usa gente de oficina, y "Hola, Ana" comunica
+    // que la sesión es suya mejor que un identificador suelto.
+    els.username.textContent = 'Hola, ' + firstName(state.displayName);
+    if (els.avatar) els.avatar.textContent = initials(state.displayName);
 
     // El widget se configura por atributos del script, así que se inyecta recién
     // acá, cuando ya tenemos el token. Cargarlo antes lo dejaría sin identidad.

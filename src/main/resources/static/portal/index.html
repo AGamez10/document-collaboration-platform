@@ -1,14 +1,12 @@
 <!DOCTYPE html>
-<html lang="es" data-op-theme="dark">
+<html lang="es" data-pt-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Office Platform — Portal</title>
   <meta name="description" content="Portal de gestión documental de Office Platform." />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="portal.css?v=1.0" />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="stylesheet" href="portal.css?v=2.0" />
 </head>
 <body>
 
@@ -118,7 +116,8 @@
         <span>Office Platform</span>
       </div>
       <div class="op-portal-topbar__user">
-        <span id="op-portal-username"></span>
+        <div class="op-portal-avatar" id="op-portal-avatar" aria-hidden="true"></div>
+        <span class="op-portal-greeting" id="op-portal-username"></span>
         <button type="button" id="op-portal-logout" class="op-portal-logout">Salir</button>
       </div>
     </header>
@@ -126,6 +125,6 @@
     <div id="office-platform" class="op-portal-widget"></div>
   </section>
 
-  <script src="portal.js?v=1.0"></script>
+  <script src="portal.js?v=2.0"></script>
 </body>
 </html>
