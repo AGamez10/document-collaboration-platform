@@ -28,6 +28,10 @@ public interface EditorSessionRepository extends JpaRepository<EditorSessionEnti
 
     Optional<EditorSessionEntity> findByIdAndClosedAtIsNull(Long id);
 
+    /** Proyectos con al menos una sesión de edición registrada. */
+    @Query("SELECT DISTINCT s.apiKeyId FROM EditorSessionEntity s")
+    List<Long> findDistinctApiKeyIds();
+
     /**
      * Open sessions whose last sign of life is older than the cutoff.
      *

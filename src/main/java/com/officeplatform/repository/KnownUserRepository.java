@@ -13,6 +13,10 @@ public interface KnownUserRepository extends JpaRepository<KnownUserEntity, Long
 
     Optional<KnownUserEntity> findByApiKeyIdAndUserId(Long apiKeyId, String userId);
 
+    /** Proyectos con al menos un usuario conocido. */
+    @org.springframework.data.jpa.repository.Query("SELECT DISTINCT u.apiKeyId FROM KnownUserEntity u")
+    java.util.List<Long> findDistinctApiKeyIds();
+
     List<KnownUserEntity> findAllByApiKeyId(Long apiKeyId);
 
     // Autocomplete for the share modal: match by display name (LIKE %term%, case-insensitive).

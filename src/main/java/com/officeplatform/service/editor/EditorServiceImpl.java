@@ -61,6 +61,8 @@ public class EditorServiceImpl implements EditorService {
     private final RestTemplate restTemplate;
     private final ShareService shareService;
     private final com.officeplatform.service.notification.NotificationService notificationService;
+    private final com.officeplatform.repository.SharePermissionRepository sharePermissionRepository;
+    private final com.officeplatform.repository.KnownUserRepository knownUserRepository;
     private final String documentServerUrl;
     private final String documentServerPublicUrl;
     private final String callbackUrl;
@@ -76,6 +78,8 @@ public class EditorServiceImpl implements EditorService {
             RestTemplate restTemplate,
             ShareService shareService,
             com.officeplatform.service.notification.NotificationService notificationService,
+            com.officeplatform.repository.SharePermissionRepository sharePermissionRepository,
+            com.officeplatform.repository.KnownUserRepository knownUserRepository,
             @Value("${office-platform.onlyoffice.document-server-url}") String documentServerUrl,
             @Value("${office-platform.onlyoffice.document-server-public-url}") String documentServerPublicUrl,
             @Value("${office-platform.onlyoffice.callback-url}") String callbackUrl,
@@ -89,6 +93,8 @@ public class EditorServiceImpl implements EditorService {
         this.restTemplate = restTemplate;
         this.shareService = shareService;
         this.notificationService = notificationService;
+        this.sharePermissionRepository = sharePermissionRepository;
+        this.knownUserRepository = knownUserRepository;
         this.documentServerUrl = documentServerUrl;
         // Sanitised at construction so every consumer of this field gets a usable URL. The
         // property has a default, but Docker Compose exports the variable as an empty string,
@@ -190,7 +196,7 @@ public class EditorServiceImpl implements EditorService {
         // secundaria y jamás debe impedir que alguien abra un documento.
         try {
             notificationService.notifyResourceOpened(
-                    fileEntity.getCreatedByUserId(),
+                    resolveFileOwner(fileEntity),
                     resolvedUserId,
                     resolvedUserName,
                     fileEntity.getId(),
@@ -339,6 +345,82 @@ public class EditorServiceImpl implements EditorService {
         session.setLastHeartbeatAt(LocalDateTime.now());
         editorSessionRepository.save(session);
         return true;
+    }
+
+
+    /**
+     * Resolves who should be told that a file was opened.
+     *
+     * <p>{@code created_by_user_id} is the intended answer but it is null on 39 of the 101 active
+     * files in the running instance: the column was added later, and files uploaded through an API
+     * key without an identity never had one. Falling back through the remaining signals is what
+     * turns the feature on for those files instead of silently notifying nobody.
+     *
+     * <p>Order matters — each step is a weaker claim than the one before it:
+     * <ol>
+     *   <li>the recorded author's cédula;</li>
+     *   <li>the owner of a private file ({@code user_id});</li>
+     *   <li>whoever shared it, which is a good proxy for whoever cares about it;</li>
+     *   <li>the display name resolved against the project's user directory.</li>
+     * </ol>
+     *
+     * @return the recipient's cédula, or {@code null} when no signal identifies anyone
+     */
+    private String resolveFileOwner(FileEntity file) {
+        String createdBy = trimToNull(file.getCreatedByUserId());
+        if (createdBy != null) {
+            return createdBy;
+        }
+
+        String owner = trimToNull(file.getUserId());
+        if (owner != null) {
+            return owner;
+        }
+
+        try {
+            String sharedBy = sharePermissionRepository
+                    .findAllByResourceTypeAndResourceId(
+                            com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, file.getId())
+                    .stream()
+                    .map(com.officeplatform.entity.SharePermissionEntity::getSharedByUserId)
+                    .map(EditorServiceImpl::trimToNull)
+                    .filter(java.util.Objects::nonNull)
+                    .findFirst()
+                    .orElse(null);
+            if (sharedBy != null) {
+                return sharedBy;
+            }
+        } catch (RuntimeException e) {
+            log.debug("No se pudo resolver el autor por permisos del archivo {}: {}",
+                    file.getId(), e.getMessage());
+        }
+
+        String createdByName = trimToNull(file.getCreatedByName());
+        if (createdByName != null && file.getApiKeyId() != null) {
+            try {
+                return knownUserRepository
+                        .findAllByApiKeyIdAndDisplayNameContainingIgnoreCase(file.getApiKeyId(), createdByName)
+                        .stream()
+                        // Coincidencia exacta: "Ana" no debe resolver a "Ana María".
+                        .filter(u -> createdByName.equalsIgnoreCase(trimToNull(u.getDisplayName())))
+                        .map(u -> trimToNull(u.getUserId()))
+                        .filter(java.util.Objects::nonNull)
+                        .findFirst()
+                        .orElse(null);
+            } catch (RuntimeException e) {
+                log.debug("No se pudo resolver el autor por nombre del archivo {}: {}",
+                        file.getId(), e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private static String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
 }

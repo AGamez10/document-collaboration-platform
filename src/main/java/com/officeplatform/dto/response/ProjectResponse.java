@@ -14,4 +14,11 @@ public class ProjectResponse {
 
     private String projectName;
 
+    /**
+     * True cuando el proyecto ya usa la plataforma: tiene archivos, sesiones de edición o
+     * usuarios registrados. Permite distinguir de un vistazo los aplicativos reales de las
+     * API keys creadas para una prueba y nunca usadas.
+     */
+    private boolean activeConsumer;
+
 }

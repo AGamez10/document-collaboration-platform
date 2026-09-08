@@ -102,6 +102,10 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
 
     Optional<FileEntity> findByUuid(String uuid);
 
+    /** Proyectos que tienen al menos un archivo. Usado para marcar consumidores activos. */
+    @org.springframework.data.jpa.repository.Query("SELECT DISTINCT f.apiKeyId FROM FileEntity f")
+    java.util.List<Long> findDistinctApiKeyIds();
+
     // Admin-only queries: not scoped by apiKeyId, used by the cross-tenant admin panel.
     List<FileEntity> findAllByDeletedAtIsNull();
 

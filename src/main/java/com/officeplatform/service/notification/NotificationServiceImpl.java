@@ -63,11 +63,21 @@ public class NotificationServiceImpl implements NotificationService {
         String owner = normalize(ownerUserId);
         String actor = normalize(actorUserId);
 
-        if (owner == null || actor == null) {
+        // Diagnóstico explícito: cuando una notificación no aparece, lo primero que hay que
+        // saber es si se descartó y por qué. Sin esto, la ausencia es indistinguible de un fallo.
+        if (owner == null) {
+            log.debug("Notificación descartada: el archivo {} no tiene autor resoluble (actor={})",
+                    resourceId, actorUserId);
             return;
         }
-        // Nobody needs to be told they opened their own document.
+        if (actor == null) {
+            log.debug("Notificación descartada: quien abrió el archivo {} no tiene identidad", resourceId);
+            return;
+        }
         if (owner.equalsIgnoreCase(actor)) {
+            // Avisarle a alguien que abrió su propio archivo enterraría lo que sí importa.
+            log.debug("Notificación descartada: autor y actor son la misma persona ({}) en el archivo {}",
+                    owner, resourceId);
             return;
         }
 
@@ -85,6 +95,9 @@ public class NotificationServiceImpl implements NotificationService {
                 .read(false)
                 .createdAt(LocalDateTime.now())
                 .build());
+
+        log.info("Notificación generada: autor={}, actor={}, archivo={} ({})",
+                owner, actor, resourceId, what);
     }
 
     @Override

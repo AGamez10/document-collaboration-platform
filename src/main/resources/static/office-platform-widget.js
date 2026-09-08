@@ -324,6 +324,17 @@
       overflow: hidden;
     }
 
+    .op-share-tag-active {
+      display: inline-block; margin-left: 7px; padding: 1px 7px;
+      background: rgba(34, 197, 94, .14); color: #22c55e;
+      border: 1px solid rgba(34, 197, 94, .32); border-radius: 999px;
+      font-size: 9.5px; font-weight: 700; letter-spacing: .3px;
+      text-transform: uppercase; vertical-align: middle;
+    }
+    .op-share-result-empty {
+      padding: 12px 13px; font-size: 12px; color: var(--op-text-dim); text-align: center;
+    }
+
     .op-share-notes { display: block; margin-bottom: 10px; }
     .op-share-notes > span {
       display: block; margin-bottom: 5px;
@@ -2050,7 +2061,9 @@
   // le avisa. Es informativo: si el sondeo falla, el gestor sigue funcionando sin
   // molestar al usuario con errores que no puede resolver.
 
-  const NOTIF_POLL_MS = 60000;
+  // 15s en vez de 60: el usuario que acaba de compartir algo quiere ver la campana
+  // encenderse mientras mira, no un minuto después.
+  const NOTIF_POLL_MS = 15000;
 
   let _notifTimer = null;
   let _notifPanel = null;
@@ -2106,6 +2119,7 @@
   async function refreshNotifications(rerender) {
     try {
       const data = await fetchNotificationsApi();
+      console.log('[OP-NOTIF] Notificaciones recibidas:', data);
       _notifItems = data.notifications || [];
       _notifUnread = data.unreadCount || 0;
       updateNotifBadge();
@@ -2120,6 +2134,10 @@
     refreshNotifications(false);
     if (_notifTimer) clearInterval(_notifTimer);
     _notifTimer = setInterval(function () { refreshNotifications(true); }, NOTIF_POLL_MS);
+
+    // Volver a la pestaña es la señal más fuerte de que el usuario quiere ver el estado
+    // actual: consultar en ese momento evita la espera hasta el próximo sondeo.
+    window.addEventListener('focus', function () { refreshNotifications(true); });
   }
 
   function closeNotifPanel() {
@@ -2868,14 +2886,46 @@
       projectResults.hidden = true;
     }
 
+    // Lista precargada: el desplegable debe poder mostrarse sin que el usuario
+    // escriba nada, y el filtrado local responde sin esperar al servidor.
+    let allProjects = null;
+
+    function ensureProjects() {
+      if (allProjects) return Promise.resolve(allProjects);
+      return listProjectsApi().then(function (list) {
+        allProjects = list || [];
+        return allProjects;
+      });
+    }
+
     function renderProjectResults(projects) {
       projectResults.innerHTML = '';
-      if (projects.length === 0) { projectResults.hidden = true; return; }
+      if (!projects || projects.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'op-share-result-empty';
+        empty.textContent = 'No hay proyectos que coincidan';
+        projectResults.appendChild(empty);
+        projectResults.hidden = false;
+        return;
+      }
       projects.forEach(function (p) {
         const item = document.createElement('button');
         item.type = 'button';
         item.className = 'op-share-result';
-        item.innerHTML = '<strong>' + escapeHtml(projectLabel(p)) + '</strong><span>ID ' + p.id + '</span>';
+        const main = document.createElement('strong');
+        main.textContent = projectLabel(p);
+        // El tag separa los aplicativos reales de las API keys creadas para una
+        // prueba y nunca usadas, que en la lista se ven exactamente igual.
+        if (p.activeConsumer) {
+          const tag = document.createElement('span');
+          tag.className = 'op-share-tag-active';
+          tag.textContent = 'Vinculado';
+          main.appendChild(tag);
+        }
+        const sub = document.createElement('span');
+        sub.textContent = 'ID ' + p.id;
+        item.appendChild(main);
+        item.appendChild(sub);
         item.onclick = function () { setSelectedProject(p); };
         projectResults.appendChild(item);
       });
@@ -2884,31 +2934,36 @@
 
     projectInput.onfocus = function () {
       if (!projectInput.value.trim()) {
-        listProjectsApi().then(renderProjectResults).catch(function () { projectResults.hidden = true; });
+        ensureProjects().then(renderProjectResults).catch(function () { projectResults.hidden = true; });
       }
     };
 
     let projectSearchTimer = null;
+    function filterLocally(term) {
+      const needle = term.toLowerCase();
+      return (allProjects || []).filter(function (p) {
+        return projectLabel(p).toLowerCase().indexOf(needle) !== -1;
+      });
+    }
+
     projectInput.oninput = function () {
       clearTimeout(projectSearchTimer);
       const term = projectInput.value.trim();
       if (!term) {
-        listProjectsApi().then(renderProjectResults).catch(function () { projectResults.hidden = true; });
+        ensureProjects().then(renderProjectResults).catch(function () { projectResults.hidden = true; });
         return;
       }
+      // Respuesta inmediata sobre lo ya cargado, y luego el servidor afina. Esperar
+      // 300ms para ver el primer resultado hace que el campo se sienta trabado.
+      if (allProjects) renderProjectResults(filterLocally(term));
+
       projectSearchTimer = setTimeout(function () {
-        // Si la búsqueda del servidor falla, se filtra sobre la lista completa: es
-        // preferible un resultado aproximado a dejar el campo mudo.
         searchProjectsApi(term)
-          .then(renderProjectResults)
-          .catch(function () {
-            listProjectsApi().then(function (all) {
-              const needle = term.toLowerCase();
-              renderProjectResults(all.filter(function (p) {
-                return projectLabel(p).toLowerCase().indexOf(needle) !== -1;
-              }));
-            }).catch(function () { projectResults.hidden = true; });
-          });
+          .then(function (found) {
+            if (found && found.length > 0) renderProjectResults(found);
+            else renderProjectResults(filterLocally(term));
+          })
+          .catch(function () { renderProjectResults(filterLocally(term)); });
       }, 300);
     };
 
@@ -2958,6 +3013,11 @@
       tabUser.classList.remove('op-active');
       projectPanel.style.display = '';
       userPanel.style.display = 'none';
+      // La lista se despliega al entrar a la pestaña: obligar a tipear para ver qué
+      // proyectos existen es pedirle al usuario que adivine el nombre exacto.
+      if (!selectedProject) {
+        ensureProjects().then(renderProjectResults).catch(function () { projectResults.hidden = true; });
+      }
     };
 
     // ── Current permissions ──
@@ -4961,6 +5021,8 @@
       } else {
         loadFiles();
       }
+      // Refrescar es un gesto de "mostrame lo último": incluye la campana.
+      refreshNotifications(true);
     };
     _viewButtons.forEach(function (btn) {
       btn.onclick = function () {
