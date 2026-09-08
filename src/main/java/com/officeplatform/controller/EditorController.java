@@ -134,4 +134,27 @@ public class EditorController {
         return new ResponseEntity<>(proxied.getBody(), headers, proxied.getStatusCode());
     }
 
+
+    /**
+     * Keeps an editing session alive while the user is actually working on it.
+     *
+     * <p>Answers 200 with {@code false} when the session is gone instead of 404: the widget uses
+     * that to stop its timer, and a missing session is an expected outcome here, not an error.
+     */
+    @PostMapping("/api/editor/sessions/{sessionId}/heartbeat")
+    public ResponseEntity<ApiResponse<Boolean>> heartbeat(
+            @PathVariable Long sessionId,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        boolean alive = editorService.heartbeat(sessionId, principal);
+
+        ApiResponse<Boolean> response = ApiResponse.<Boolean>builder()
+                .success(true)
+                .message(alive ? "Sesión activa" : "La sesión ya no está abierta")
+                .data(alive)
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
 }

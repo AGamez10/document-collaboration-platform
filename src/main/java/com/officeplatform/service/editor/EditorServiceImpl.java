@@ -162,21 +162,26 @@ public class EditorServiceImpl implements EditorService {
         String token = onlyOfficeService.signConfig(config);
         config.setToken(token);
 
-        editorSessionRepository.save(EditorSessionEntity.builder()
+        LocalDateTime openedAt = LocalDateTime.now();
+        EditorSessionEntity savedSession = editorSessionRepository.save(EditorSessionEntity.builder()
                 .fileId(fileEntity.getId())
                 .fileName(fileEntity.getOriginalFileName())
                 .documentKey(documentKey)
                 .userId(resolvedUserId)
                 .userName(resolvedUserName)
                 .apiKeyId(principal.getApiKeyId())
-                .openedAt(LocalDateTime.now())
+                .openedAt(openedAt)
+                // Seeded with openedAt so a session counts as fresh from the moment it opens,
+                // instead of looking stale until the first heartbeat arrives two minutes later.
+                .lastHeartbeatAt(openedAt)
                 .build());
         long activeSessionsCount = editorSessionRepository.findAllByFileIdAndClosedAtIsNull(fileEntity.getId()).size();
 
         activityLogRecorder.record(principal.getApiKeyId(), userId, userName, ActivityAction.EDITOR_OPEN,
                 fileEntity.getId(), fileEntity.getOriginalFileName(), null, fileEntity.getFolderId());
 
-        return new EditorConfigResponse(document, documentServerPublicUrl, user, permissions, token, editorConfig, activeSessionsCount);
+        return new EditorConfigResponse(document, documentServerPublicUrl, user, permissions, token,
+                editorConfig, activeSessionsCount, savedSession.getId());
     }
 
     @Override
@@ -293,6 +298,26 @@ public class EditorServiceImpl implements EditorService {
             case "ppt", "pptx", "odp" -> "slide";
             default -> "word";
         };
+    }
+
+
+    @Override
+    @Transactional
+    public boolean heartbeat(Long sessionId, ApiKeyPrincipal principal) {
+        EditorSessionEntity session = editorSessionRepository
+                .findByIdAndClosedAtIsNull(sessionId).orElse(null);
+        if (session == null) {
+            // Already reaped or never existed. Answering false rather than throwing lets the
+            // widget stop its timer quietly instead of surfacing an error to the user.
+            return false;
+        }
+        // Scoped to the caller's project so one tenant cannot keep another tenant's session alive.
+        if (!session.getApiKeyId().equals(principal.getApiKeyId())) {
+            return false;
+        }
+        session.setLastHeartbeatAt(LocalDateTime.now());
+        editorSessionRepository.save(session);
+        return true;
     }
 
 }

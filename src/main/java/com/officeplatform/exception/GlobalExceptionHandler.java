@@ -209,7 +209,12 @@ public class GlobalExceptionHandler {
         ApiResponse<Void> response = ApiResponse.<Void>builder()
             .success(false)
             .timestamp(LocalDateTime.now())
-            .message("Solicitud inválida")
+            // El mensaje de la excepción explica QUÉ está mal ("debe combinar letras y
+            // números"). Reemplazarlo por "Solicitud inválida" deja al usuario adivinando
+            // qué corregir, que es justo lo que un mensaje de validación debe evitar.
+            .message(ex.getMessage() != null && !ex.getMessage().isBlank()
+                    ? ex.getMessage()
+                    : "Solicitud inválida")
             .metadata(Map.of("error", error))
             .build();
 

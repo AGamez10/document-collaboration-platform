@@ -279,6 +279,31 @@
       border-color: var(--op-accent);
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--op-accent) 20%, transparent);
     }
+    /* Aviso de inactividad: flota sobre el editor sin taparlo. */
+    .op-idle-warn {
+      position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+      z-index: 40; display: flex; align-items: center; gap: 14px;
+      background: #1f2937; color: #fff; border: 1px solid rgba(255,255,255,.14);
+      border-radius: 10px; padding: 12px 16px; font-size: 13px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.35); max-width: 92vw;
+    }
+    .op-idle-warn-btn {
+      appearance: none; border: 0; border-radius: 7px; cursor: pointer;
+      background: var(--op-accent); color: #fff;
+      font-size: 12.5px; font-weight: 600; padding: 7px 14px; white-space: nowrap;
+    }
+    .op-idle-warn-btn:hover { filter: brightness(1.1); }
+    .op-idle-suspended {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 14px; height: 100%; padding: 40px 24px; text-align: center;
+      background: var(--op-bg); color: var(--op-text);
+    }
+    .op-idle-suspended h3 { margin: 0; font-size: 18px; font-weight: 700; }
+    .op-idle-suspended p {
+      margin: 0; font-size: 13.5px; color: var(--op-text-dim);
+      line-height: 1.6; max-width: 420px;
+    }
+
     .op-macros-help-btn {
       width: 32px; height: 32px; flex: 0 0 auto;
       border: 1px solid var(--op-border); border-radius: 50%;
@@ -1700,6 +1725,7 @@
   }
 
   function closeEditor() {
+    stopIdleWatch();
     if (_docsAPI) { try { _docsAPI.destroyEditor(); } catch (_) {} _docsAPI = null; }
     if (_editorOverlay) { _editorOverlay.remove(); _editorOverlay = null; }
     const prev = document.getElementById('op-oo-script');
@@ -1744,6 +1770,170 @@
 
     btn.onclick = function () { drawer.classList.toggle('open'); };
     drawer.querySelector('.op-fm-drawer-close').onclick = function () { drawer.classList.remove('open'); };
+  }
+
+
+  // ── Suspensión por inactividad ─────────────────────────────────────────────
+  // OnlyOffice Community Edition admite 20 conexiones simultáneas. Una pestaña
+  // olvidada retiene una de por vida, así que un puñado de ellas deja al resto de
+  // la empresa sin poder abrir documentos. El backend tiene su propio reaper; esto
+  // libera el cupo antes y, sobre todo, le explica al usuario qué pasó en vez de
+  // dejarlo mirando un editor muerto.
+
+  const IDLE_EVENTS = ['mousemove', 'mousedown', 'keydown', 'click', 'touchstart', 'wheel'];
+  const IDLE_HEARTBEAT_MS = 120000;  // 2 min: avisa al backend que seguimos acá
+  const IDLE_WARN_MS      = 540000;  // 9 min: aviso con cuenta regresiva
+  const IDLE_SUSPEND_MS   = 600000;  // 10 min: se cierra, igual que el reaper
+
+  let _idleLastActivity = 0;
+  let _idleTimer = null;
+  let _idleHeartbeatTimer = null;
+  let _idleWarnEl = null;
+  let _idleCountdown = null;
+  let _idleSessionId = null;
+  let _idleSuspended = false;
+
+  /** Cualquier señal de vida del usuario reinicia el reloj y retira el aviso. */
+  function markEditorActivity() {
+    _idleLastActivity = Date.now();
+    if (_idleWarnEl) dismissIdleWarning();
+  }
+
+  function startIdleWatch(sessionId) {
+    stopIdleWatch();
+    _idleSessionId = sessionId || null;
+    _idleSuspended = false;
+    _idleLastActivity = Date.now();
+
+    IDLE_EVENTS.forEach(function (evt) {
+      document.addEventListener(evt, markEditorActivity, true);
+    });
+
+    // Un solo temporizador de 5s en vez de uno por umbral: menos relojes que
+    // desincronizar y el estado se deriva siempre del último instante de actividad.
+    _idleTimer = setInterval(checkIdleState, 5000);
+
+    _idleHeartbeatTimer = setInterval(function () {
+      // Solo se late si hubo actividad reciente. Latir siempre mantendría viva
+      // una pestaña abandonada, que es justamente lo que se quiere evitar.
+      if (Date.now() - _idleLastActivity < IDLE_HEARTBEAT_MS) sendHeartbeat();
+    }, IDLE_HEARTBEAT_MS);
+  }
+
+  function stopIdleWatch() {
+    IDLE_EVENTS.forEach(function (evt) {
+      document.removeEventListener(evt, markEditorActivity, true);
+    });
+    if (_idleTimer) { clearInterval(_idleTimer); _idleTimer = null; }
+    if (_idleHeartbeatTimer) { clearInterval(_idleHeartbeatTimer); _idleHeartbeatTimer = null; }
+    dismissIdleWarning();
+    _idleSessionId = null;
+  }
+
+  async function sendHeartbeat() {
+    if (!_idleSessionId) return;
+    try {
+      const res = await apiFetch('/api/editor/sessions/' + _idleSessionId + '/heartbeat', { method: 'POST' });
+      const j = await res.json();
+      // El backend responde false cuando la sesión ya fue cerrada por el reaper:
+      // seguir latiendo sobre una sesión inexistente no aporta nada.
+      if (j && j.data === false) _idleSessionId = null;
+    } catch (_) {
+      // Un heartbeat perdido no es motivo para molestar al usuario: el próximo
+      // reintenta, y si el backend nunca se entera, el reaper cierra la sesión.
+    }
+  }
+
+  function checkIdleState() {
+    if (_idleSuspended || !_editorOverlay) return;
+    const idleFor = Date.now() - _idleLastActivity;
+
+    if (idleFor >= IDLE_SUSPEND_MS) {
+      suspendEditorForInactivity();
+    } else if (idleFor >= IDLE_WARN_MS && !_idleWarnEl) {
+      showIdleWarning();
+    }
+  }
+
+  /** Aviso con cuenta regresiva y una salida clara para el usuario. */
+  function showIdleWarning() {
+    if (_idleWarnEl || !_editorOverlay) return;
+
+    const el = document.createElement('div');
+    el.className = 'op-idle-warn';
+    const text = document.createElement('span');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'op-idle-warn-btn';
+    btn.textContent = 'Continuar editando';
+    btn.onclick = markEditorActivity;
+    el.appendChild(text);
+    el.appendChild(btn);
+    _editorOverlay.appendChild(el);
+    _idleWarnEl = el;
+
+    const tick = function () {
+      const left = Math.max(0, Math.ceil((IDLE_SUSPEND_MS - (Date.now() - _idleLastActivity)) / 1000));
+      text.textContent = 'Tu sesión se suspenderá en ' + left + ' segundos por inactividad para liberar recursos.';
+      if (left <= 0) dismissIdleWarning();
+    };
+    tick();
+    _idleCountdown = setInterval(tick, 1000);
+  }
+
+  function dismissIdleWarning() {
+    if (_idleCountdown) { clearInterval(_idleCountdown); _idleCountdown = null; }
+    if (_idleWarnEl && _idleWarnEl.parentNode) _idleWarnEl.parentNode.removeChild(_idleWarnEl);
+    _idleWarnEl = null;
+  }
+
+  /**
+   * Cierra el editor y deja en su lugar una pantalla que explica qué pasó.
+   * Se destruye la instancia de DocsAPI a propósito: ocultarla mantendría viva la
+   * conexión con Document Server, que es exactamente el recurso que se busca liberar.
+   */
+  function suspendEditorForInactivity() {
+    if (_idleSuspended) return;
+    _idleSuspended = true;
+    dismissIdleWarning();
+
+    const sessionId = _idleSessionId;
+    stopIdleWatch();
+
+    try {
+      if (_docsAPI && typeof _docsAPI.destroyEditor === 'function') _docsAPI.destroyEditor();
+    } catch (_) {}
+    _docsAPI = null;
+
+    if (sessionId) {
+      // Aviso al backend para que libere el cupo ya, sin esperar al reaper.
+      apiFetch('/api/editor/' + _currentEditorFileId + '/close', { method: 'POST' }).catch(function () {});
+    }
+
+    const host = _editorOverlay && _editorOverlay.querySelector('#op-editor-container');
+    if (!host) return;
+    host.innerHTML = '';
+
+    const box = document.createElement('div');
+    box.className = 'op-idle-suspended';
+    const h = document.createElement('h3');
+    h.textContent = 'Sesión pausada por inactividad';
+    const p = document.createElement('p');
+    p.textContent = 'Cerramos el documento para liberar una conexión de edición. '
+      + 'Tus cambios quedaron guardados.';
+    const resume = document.createElement('button');
+    resume.type = 'button';
+    resume.className = 'op-btn-primary';
+    resume.textContent = 'Reanudar edición';
+    resume.onclick = function () {
+      const fileId = _currentEditorFileId;
+      closeEditor();
+      if (fileId) openEditor(fileId);
+    };
+    box.appendChild(h);
+    box.appendChild(p);
+    box.appendChild(resume);
+    host.appendChild(box);
   }
 
   function openEditor(fileId, fileName) {
@@ -1847,6 +2037,9 @@
             events: {
               onDocumentReady: function () {
                 if (loading) loading.remove();
+                // El reloj arranca recién acá: antes de que el documento cargue no hay
+                // sesión de edición que valga la pena vigilar.
+                startIdleWatch(cfg.sessionId);
                 _editorDirty = false;
                 if (statusEl) { statusEl.textContent = 'Guardado'; statusEl.setAttribute('data-state', 'saved'); }
               },
@@ -3486,8 +3679,12 @@
   function buildRestrictedBadge() {
     const badge = document.createElement('div');
     badge.className = 'op-restricted';
-    badge.title = 'Acceso restringido: compartido con usuarios/proyectos específicos';
-    badge.innerHTML = ICONS.lock + '<span>Restringido</span>';
+    // El icono de personas comunica mejor lo que realmente significa: el recurso tiene
+    // destinatarios explícitos. Un candado sugería "bloqueado", que es lo contrario de
+    // lo que ve el jefe que acaba de compartirlo.
+    badge.title = 'Compartido con usuarios o proyectos específicos. '
+      + 'Solo ellos, el creador y los administradores lo ven.';
+    badge.innerHTML = ICONS.users + '<span>Compartido</span>';
     return badge;
   }
 

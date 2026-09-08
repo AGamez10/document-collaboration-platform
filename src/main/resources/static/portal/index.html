@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es" data-op-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Office Platform — Portal</title>
+  <meta name="description" content="Portal de gestión documental de Office Platform." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="portal.css?v=1.0" />
+</head>
+<body>
+
+  <!-- ── Login ──────────────────────────────────────────────────────────── -->
+  <section id="op-portal-login" class="op-portal-login">
+    <div class="op-portal-login__bg" aria-hidden="true"></div>
+
+    <form id="op-portal-form" class="op-portal-card" autocomplete="on">
+      <div class="op-portal-brand">
+        <div class="op-portal-logo" aria-hidden="true">
+          <svg width="42" height="42" viewBox="0 0 36 36" fill="none">
+            <rect width="36" height="36" rx="10" fill="url(#lg-portal)"/>
+            <path d="M9 12h18M9 18h12M9 24h14" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+            <defs>
+              <linearGradient id="lg-portal" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+                <stop stop-color="#4f46e5"/><stop offset="1" stop-color="#7c3aed"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h1>Office Platform</h1>
+        <p>Gestión documental corporativa</p>
+      </div>
+
+      <label class="op-portal-field">
+        <span>Cédula</span>
+        <input type="text" id="op-portal-cedula" name="username" inputmode="numeric"
+               autocomplete="username" required placeholder="Tu número de cédula" />
+      </label>
+
+      <label class="op-portal-field">
+        <span>Contraseña</span>
+        <input type="password" id="op-portal-password" name="password"
+               autocomplete="current-password" required placeholder="••••••••" />
+      </label>
+
+      <p id="op-portal-error" class="op-portal-error" hidden></p>
+
+      <button type="submit" id="op-portal-submit" class="op-portal-btn">
+        <span>Iniciar sesión</span>
+      </button>
+
+      <p class="op-portal-hint">
+        ¿Primera vez? Ingresá con tu cédula y la clave provisional <strong>2026</strong>.
+        El sistema te va a pedir que la cambies.
+      </p>
+    </form>
+  </section>
+
+  <!-- ── Cambio obligatorio de contraseña ───────────────────────────────── -->
+  <section id="op-portal-change" class="op-portal-login" hidden>
+    <div class="op-portal-login__bg" aria-hidden="true"></div>
+
+    <form id="op-portal-change-form" class="op-portal-card">
+      <div class="op-portal-brand">
+        <div class="op-portal-logo op-portal-logo--warn" aria-hidden="true">
+          <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+        </div>
+        <h1>Cambiá tu contraseña</h1>
+        <p>Por seguridad, la clave provisional <strong>2026</strong> no sirve para trabajar.</p>
+      </div>
+
+      <label class="op-portal-field">
+        <span>Nueva contraseña</span>
+        <input type="password" id="op-portal-new" autocomplete="new-password" required
+               placeholder="Mínimo 8 caracteres" />
+      </label>
+
+      <label class="op-portal-field">
+        <span>Repetir contraseña</span>
+        <input type="password" id="op-portal-new2" autocomplete="new-password" required
+               placeholder="Escribila de nuevo" />
+      </label>
+
+      <ul class="op-portal-rules" id="op-portal-rules">
+        <li data-rule="len">Al menos 8 caracteres</li>
+        <li data-rule="mix">Letras y números</li>
+        <li data-rule="notdefault">Distinta de 2026</li>
+        <li data-rule="match">Las dos coinciden</li>
+      </ul>
+
+      <p id="op-portal-change-error" class="op-portal-error" hidden></p>
+
+      <button type="submit" id="op-portal-change-submit" class="op-portal-btn">
+        <span>Guardar y entrar</span>
+      </button>
+    </form>
+  </section>
+
+  <!-- ── Gestor documental ──────────────────────────────────────────────── -->
+  <section id="op-portal-app" class="op-portal-app" hidden>
+    <header class="op-portal-topbar">
+      <div class="op-portal-topbar__brand">
+        <svg width="22" height="22" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+          <rect width="36" height="36" rx="9" fill="url(#lg-top)"/>
+          <path d="M9 12h18M9 18h12M9 24h14" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+          <defs>
+            <linearGradient id="lg-top" x1="0" y1="0" x2="36" y2="36" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#4f46e5"/><stop offset="1" stop-color="#7c3aed"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span>Office Platform</span>
+      </div>
+      <div class="op-portal-topbar__user">
+        <span id="op-portal-username"></span>
+        <button type="button" id="op-portal-logout" class="op-portal-logout">Salir</button>
+      </div>
+    </header>
+
+    <div id="office-platform" class="op-portal-widget"></div>
+  </section>
+
+  <script src="portal.js?v=1.0"></script>
+</body>
+</html>

@@ -18,5 +18,8 @@ public enum ActivityAction {
     DOWNLOAD_FOLDER,
     SHARE,
     UNSHARE,
-    REVOKE_SHARE
+    REVOKE_SHARE,
+
+    /** Session closed by the reaper because the browser stopped reporting activity. */
+    SESSION_TIMEOUT
 }

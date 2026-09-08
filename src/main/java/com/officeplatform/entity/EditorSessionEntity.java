@@ -66,4 +66,14 @@ public class EditorSessionEntity {
     @Column(name = "closed_at")
     private LocalDateTime closedAt;
 
+    /**
+     * Last sign of life from the browser holding this session.
+     *
+     * <p>Null on rows created before the column existed, so every query that uses it falls back
+     * to {@code openedAt}: an old session is judged by when it opened rather than being treated
+     * as infinitely fresh.
+     */
+    @Column(name = "last_heartbeat_at")
+    private LocalDateTime lastHeartbeatAt;
+
 }

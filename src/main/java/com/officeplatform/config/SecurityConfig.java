@@ -70,6 +70,10 @@ public class SecurityConfig {
                 .requestMatchers(
                         "/api/health",
                         "/api/auth/resolve",          // <-- endpoint público para Widget Token
+                        // La puerta de entrada del portal no puede exigir la credencial que
+                        // ella misma emite. La autorización ocurre después, con el token.
+                        "/api/portal/auth/**",
+                        "/portal/**",
                         "/error",
                         // springdoc.swagger-ui.path is /swagger-ui.html, and that exact path is not
                         // covered by /swagger-ui/** — without it the configured entry point answers
