@@ -100,6 +100,12 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     List<FileEntity> findAllByApiKeyIdAndCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNull(
             Long apiKeyId, String createdByName);
 
+    /**
+     * Archivos de una carpeta sin filtrar por proyecto. La autorización ocurre sobre la carpeta
+     * contenedora; restringir aquí vaciaba el ZIP de toda carpeta compartida entre proyectos.
+     */
+    List<FileEntity> findAllByFolderIdAndDeletedAtIsNull(Long folderId);
+
     Optional<FileEntity> findByUuid(String uuid);
 
     /** Proyectos que tienen al menos un archivo. Usado para marcar consumidores activos. */

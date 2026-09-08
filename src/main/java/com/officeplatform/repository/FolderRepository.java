@@ -19,6 +19,12 @@ public interface FolderRepository extends JpaRepository<FolderEntity, Long> {
 
     List<FolderEntity> findAllByApiKeyIdAndParentId(Long apiKeyId, Long parentId);
 
+    /**
+     * Subcarpetas sin filtrar por proyecto. Una carpeta compartida entre proyectos contiene
+     * subcarpetas y archivos de varios api_key_id; filtrar por el del llamador devuelve cero.
+     */
+    List<FolderEntity> findAllByParentId(Long parentId);
+
     List<FolderEntity> findAllByApiKeyIdAndParentIdAndUserIdIsNull(Long apiKeyId, Long parentId);
 
     List<FolderEntity> findAllByApiKeyIdAndParentIdAndUserId(Long apiKeyId, Long parentId, String userId);

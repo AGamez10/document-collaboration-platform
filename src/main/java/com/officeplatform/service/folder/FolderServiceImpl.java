@@ -257,11 +257,22 @@ public class FolderServiceImpl implements FolderService {
 
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         Set<String> usedEntryNames = new HashSet<>();
+        int includedFiles = 0;
         try (ZipOutputStream zip = new ZipOutputStream(buffer)) {
             for (FolderEntity node : tree) {
                 String folderPath = pathByFolderId.get(node.getId());
-                List<FileEntity> files =
-                        fileRepository.findAllByApiKeyIdAndFolderIdAndDeletedAtIsNull(apiKeyId, node.getId());
+                if (folderPath == null) {
+                    continue;
+                }
+
+                // Entrada de directorio explícita: sin ella una subcarpeta vacía desaparece del
+                // ZIP y el usuario cree que se perdió, en vez de verla vacía como estaba.
+                zip.putNextEntry(new ZipEntry(folderPath + "/"));
+                zip.closeEntry();
+
+                // Sin filtrar por proyecto: la carpeta ya fue autorizada, y una compartida entre
+                // proyectos contiene archivos de varios api_key_id.
+                List<FileEntity> files = fileRepository.findAllByFolderIdAndDeletedAtIsNull(node.getId());
                 for (FileEntity file : files) {
                     String entryName = uniqueEntryName(usedEntryNames, folderPath + "/" + file.getOriginalFileName());
                     zip.putNextEntry(new ZipEntry(entryName));
@@ -269,11 +280,15 @@ public class FolderServiceImpl implements FolderService {
                         content.transferTo(zip);
                     }
                     zip.closeEntry();
+                    includedFiles++;
                 }
             }
         } catch (IOException e) {
             throw new UncheckedIOException("No se pudo generar el ZIP de la carpeta", e);
         }
+
+        log.info("Generando ZIP para carpeta '{}': {} carpetas, {} archivos incluidos",
+                root.getName(), tree.size(), includedFiles);
 
         activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.DOWNLOAD_FOLDER,
                 null, root.getName(), "Carpeta descargada como ZIP", root.getId());
@@ -378,15 +393,29 @@ public class FolderServiceImpl implements FolderService {
     }
 
     /** Breadth-first collection of a folder and all of its descendants (root included). */
+    /**
+     * Walks the whole subtree under a folder, regardless of which project each node belongs to.
+     *
+     * <p>Filtering by the caller's api_key_id emptied the tree for any shared folder: its
+     * subfolders and files can belong to several projects at once, which is precisely what
+     * sharing a folder across projects produces. Authorisation happens once, on the root folder,
+     * in the controller — everything inside it is reachable by definition.
+     *
+     * <p>Guarded against cycles: a corrupted parent chain would otherwise loop forever.
+     */
     private List<FolderEntity> collectFolderTree(FolderEntity root, Long apiKeyId) {
         List<FolderEntity> tree = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
         Deque<FolderEntity> queue = new ArrayDeque<>();
         queue.add(root);
 
         while (!queue.isEmpty()) {
             FolderEntity current = queue.poll();
+            if (!seen.add(current.getId())) {
+                continue;
+            }
             tree.add(current);
-            queue.addAll(folderRepository.findAllByApiKeyIdAndParentId(apiKeyId, current.getId()));
+            queue.addAll(folderRepository.findAllByParentId(current.getId()));
         }
 
         return tree;

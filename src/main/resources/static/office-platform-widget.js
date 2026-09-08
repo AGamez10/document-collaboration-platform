@@ -1385,6 +1385,12 @@
   }
 
   function createZip(entries) {
+    // Un ZIP de cero entradas es un archivo de 22 bytes que el explorador abre vacío: el
+    // usuario cree que perdió sus archivos. Mejor decírselo que entregarle eso.
+    if (!entries || entries.length === 0) {
+      toast('No hay archivos para descargar', 'error');
+      return null;
+    }
     const encoder = new TextEncoder();
     const localChunks = [];
     const centralChunks = [];
@@ -1428,7 +1434,10 @@
       pushUint16LE(centralHeader, 0);
       pushUint16LE(centralHeader, 0);
       pushUint16LE(centralHeader, 0);
-      pushUint32LE(centralHeader, 0);
+      // Atributos externos. En cero, algunos extractores tratan la entrada como sin permisos
+      // y la reportan vacía o corrupta. 0x81A40000 son los bits de un archivo regular 0644
+      // en el byte alto (Unix) que Windows, macOS y WinRAR interpretan correctamente.
+      pushUint32LE(centralHeader, 0x81A40000);
       pushUint32LE(centralHeader, offset);
       const centralHeaderBytes = new Uint8Array(centralHeader);
       centralChunks.push(centralHeaderBytes, nameBytes);
@@ -3904,10 +3913,33 @@
   function handleBatchDownload() {
     const ids = Array.from(state.selected);
     if (ids.length === 0) return;
+
     const byId = {};
     (state.files || []).forEach(function (f) { byId[f.id] = f; });
     (state.trash || []).forEach(function (f) { byId[f.id] = f; });
-    downloadMultiple(ids, byId);
+
+    // Una carpeta seleccionada no se puede pedir por /api/files/{id}: ese endpoint solo
+    // conoce archivos y responde 404, lo que dejaba la descarga entera sin resultado.
+    const folderById = {};
+    (state.folders || []).forEach(function (f) { folderById[f.id] = f; });
+
+    const folderIds = ids.filter(function (id) { return folderById[id]; });
+    const fileIds = ids.filter(function (id) { return !folderById[id]; });
+
+    if (folderIds.length === 1 && fileIds.length === 0) {
+      // Caso simple: el backend ya arma el ZIP con toda la jerarquía.
+      return downloadFolderZip(folderById[folderIds[0]]);
+    }
+
+    // Mezcla o varias carpetas: cada carpeta baja como su propio ZIP y los archiv0s
+    // sueltos van juntos. Anidar ZIPs dentro de otro ZIP es peor para el usuario final.
+    folderIds.forEach(function (id) { downloadFolderZip(folderById[id]); });
+
+    if (fileIds.length > 0) {
+      downloadMultiple(fileIds, byId);
+    } else if (folderIds.length > 1) {
+      toast('Descargando ' + folderIds.length + ' carpetas como ZIP separados', 'info');
+    }
   }
 
   async function downloadMultiple(ids, byId) {
@@ -3936,6 +3968,7 @@
       return;
     }
     const blob = createZip(entries);
+    if (!blob) return;
     triggerBlobDownload(blob, 'archivos.zip');
     toast(
       failed === 0 ? 'Descarga lista (' + entries.length + ' archivos)' : entries.length + ' archivo(s) listos, ' + failed + ' con error',
