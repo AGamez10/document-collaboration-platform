@@ -38,5 +38,9 @@ public class BackupRestoreResponse {
     private int binariesRestored;
     private int binariesSkipped;
 
+    /** Reglas de acceso reinstaladas: sin ellas una restauracion abre lo que estaba restringido. */
+    private int sharePermissionsCreated;
+    private int sharePermissionsUpdated;
+
     private List<String> warnings;
 }

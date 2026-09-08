@@ -27,11 +27,13 @@ import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
 import com.officeplatform.entity.KnownUserEntity;
+import com.officeplatform.entity.SharePermissionEntity;
 import com.officeplatform.exception.StorageException;
 import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.KnownUserRepository;
+import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.storage.StorageService;
 
 import lombok.extern.slf4j.Slf4j;
@@ -65,6 +67,7 @@ public class BackupRestoreService {
     private final FolderRepository folderRepository;
     private final ApiKeyRepository apiKeyRepository;
     private final KnownUserRepository knownUserRepository;
+    private final SharePermissionRepository sharePermissionRepository;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
@@ -75,6 +78,7 @@ public class BackupRestoreService {
             FolderRepository folderRepository,
             ApiKeyRepository apiKeyRepository,
             KnownUserRepository knownUserRepository,
+            SharePermissionRepository sharePermissionRepository,
             StorageService storageService,
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
@@ -83,6 +87,7 @@ public class BackupRestoreService {
         this.folderRepository = folderRepository;
         this.apiKeyRepository = apiKeyRepository;
         this.knownUserRepository = knownUserRepository;
+        this.sharePermissionRepository = sharePermissionRepository;
         this.storageService = storageService;
         this.objectMapper = objectMapper;
         // An explicit template rather than @Transactional on a method of this same bean: that
@@ -99,6 +104,7 @@ public class BackupRestoreService {
         int foldersCreated, foldersUpdated;
         int filesCreated, filesUpdated;
         int binariesRestored, binariesSkipped;
+        int sharePermissionsCreated, sharePermissionsUpdated;
         final List<String> warnings = new ArrayList<>();
     }
 
@@ -164,9 +170,11 @@ public class BackupRestoreService {
         restoreMetadata(manifest, tally);
         restoreBinaries(manifest.path("filesMetadata"), zipEntries, tally);
 
-        log.info("Restauración de '{}' completada: {} archivos, {} carpetas, {} binarios ({} omitidos)",
+        log.info("Restauración de '{}' completada: {} archivos, {} carpetas, {} permisos, {} binarios ({} omitidos)",
                 fileName, tally.filesCreated + tally.filesUpdated,
-                tally.foldersCreated + tally.foldersUpdated, tally.binariesRestored, tally.binariesSkipped);
+                tally.foldersCreated + tally.foldersUpdated,
+                tally.sharePermissionsCreated + tally.sharePermissionsUpdated,
+                tally.binariesRestored, tally.binariesSkipped);
 
         return BackupRestoreResponse.builder()
                 .fileName(fileName)
@@ -181,6 +189,8 @@ public class BackupRestoreService {
                 .filesUpdated(tally.filesUpdated)
                 .binariesRestored(tally.binariesRestored)
                 .binariesSkipped(tally.binariesSkipped)
+                .sharePermissionsCreated(tally.sharePermissionsCreated)
+                .sharePermissionsUpdated(tally.sharePermissionsUpdated)
                 .warnings(tally.warnings)
                 .build();
     }
@@ -194,7 +204,12 @@ public class BackupRestoreService {
             Map<Long, Long> apiKeyIds = restoreApiKeys(manifest.path("apiKeysMetadata"), tally);
             restoreKnownUsers(manifest.path("knownUsersMetadata"), apiKeyIds, tally);
             Map<Long, Long> folderIds = restoreFolders(manifest.path("foldersMetadata"), apiKeyIds, tally);
-            restoreFiles(manifest.path("filesMetadata"), apiKeyIds, folderIds, tally);
+            Map<Long, Long> fileIds = restoreFiles(manifest.path("filesMetadata"), apiKeyIds, folderIds, tally);
+            // Los permisos van al final porque cada regla apunta a un archivo o carpeta y necesita
+            // los ids que acaban de asignarse. Dentro de la misma transacción: restaurar los
+            // documentos y perder sus restricciones dejaría a la vista lo que estaba limitado.
+            restoreSharePermissions(manifest.path("sharePermissionsMetadata"),
+                    apiKeyIds, folderIds, fileIds, tally);
         });
     }
 
@@ -331,8 +346,10 @@ public class BackupRestoreService {
         return idMap;
     }
 
-    private void restoreFiles(JsonNode nodes, Map<Long, Long> apiKeyIds,
-                              Map<Long, Long> folderIds, Tally tally) {
+    /** @return map from the file id recorded in the backup to the id in this database */
+    private Map<Long, Long> restoreFiles(JsonNode nodes, Map<Long, Long> apiKeyIds,
+                                         Map<Long, Long> folderIds, Tally tally) {
+        Map<Long, Long> idMap = new HashMap<>();
         for (JsonNode node : arrayOf(nodes)) {
             String uuid = text(node, "uuid");
             if (uuid == null) {
@@ -374,12 +391,125 @@ public class BackupRestoreService {
             }
             entity.setFolderId(resolvedFolder);
 
-            fileRepository.save(entity);
+            FileEntity saved = fileRepository.save(entity);
+            Long backupId = number(node, "id");
+            if (backupId != null) {
+                idMap.put(backupId, saved.getId());
+            }
             if (isNew) {
                 tally.filesCreated++;
             } else {
                 tally.filesUpdated++;
             }
+        }
+        return idMap;
+    }
+
+    /**
+     * Reinstates the sharing grants.
+     *
+     * <p>A restore that brought the documents back but not their grants silently widened access:
+     * every VIEW/DOWNLOAD/EDIT restriction, every note and every expiry disappeared, and a file
+     * limited to one person became visible to the whole project. The rows are re-linked through the
+     * id maps built by the previous steps, because a grant points at a numeric resource id and
+     * those ids belong to the instance the backup came from.
+     */
+    private void restoreSharePermissions(JsonNode nodes, Map<Long, Long> apiKeyIds,
+                                         Map<Long, Long> folderIds, Map<Long, Long> fileIds,
+                                         Tally tally) {
+        for (JsonNode node : arrayOf(nodes)) {
+            SharePermissionEntity.ResourceType resourceType =
+                    enumOf(SharePermissionEntity.ResourceType.class, text(node, "resourceType"));
+            SharePermissionEntity.TargetType targetType =
+                    enumOf(SharePermissionEntity.TargetType.class, text(node, "targetType"));
+            SharePermissionEntity.PermissionLevel level =
+                    enumOf(SharePermissionEntity.PermissionLevel.class, text(node, "permissionLevel"));
+            if (resourceType == null || targetType == null || level == null) {
+                tally.warnings.add("Permiso omitido: el respaldo no declara su tipo o su nivel de acceso.");
+                continue;
+            }
+
+            Long resourceId = mapped(
+                    resourceType == SharePermissionEntity.ResourceType.FILE ? fileIds : folderIds,
+                    number(node, "resourceId"));
+            if (resourceId == null) {
+                // Conceder acceso sobre un id que acá significa otra cosa es peor que no
+                // restaurar la regla: abriría un recurso ajeno.
+                tally.warnings.add("Permiso omitido: el "
+                        + (resourceType == SharePermissionEntity.ResourceType.FILE ? "archivo" : "la carpeta")
+                        + " sobre el que aplicaba no estaba en el respaldo.");
+                continue;
+            }
+            Long sourceApiKeyId = mapped(apiKeyIds, number(node, "sourceApiKeyId"));
+            if (sourceApiKeyId == null) {
+                sourceApiKeyId = number(node, "sourceApiKeyId");
+            }
+            if (sourceApiKeyId == null) {
+                tally.warnings.add("Permiso omitido: no se pudo resolver el proyecto de origen.");
+                continue;
+            }
+
+            String targetUserId = text(node, "targetUserId");
+            Long targetApiKeyId = null;
+            if (targetType == SharePermissionEntity.TargetType.PROJECT) {
+                targetApiKeyId = mapped(apiKeyIds, number(node, "targetApiKeyId"));
+                if (targetApiKeyId == null) {
+                    tally.warnings.add("Permiso omitido: el proyecto destinatario no estaba en el respaldo.");
+                    continue;
+                }
+            }
+
+            SharePermissionEntity entity = findExistingGrant(
+                    resourceType, resourceId, sourceApiKeyId, targetType, targetUserId, targetApiKeyId);
+            boolean isNew = entity == null;
+            if (isNew) {
+                entity = new SharePermissionEntity();
+                entity.setResourceType(resourceType);
+                entity.setResourceId(resourceId);
+                entity.setSourceApiKeyId(sourceApiKeyId);
+                entity.setTargetType(targetType);
+                entity.setTargetUserId(targetUserId);
+                entity.setTargetApiKeyId(targetApiKeyId);
+                entity.setCreatedAt(dateTime(node, "createdAt", LocalDateTime.now()));
+            }
+            entity.setPermissionLevel(level);
+            entity.setSharedByUserId(text(node, "sharedByUserId"));
+            entity.setSharedByName(text(node, "sharedByName"));
+            entity.setNotes(text(node, "notes"));
+            entity.setExpiresAt(dateTime(node, "expiresAt", null));
+
+            sharePermissionRepository.save(entity);
+            if (isNew) {
+                tally.sharePermissionsCreated++;
+            } else {
+                tally.sharePermissionsUpdated++;
+            }
+        }
+    }
+
+    /** La regla equivalente ya presente, buscada por su clave de negocio y no por id. */
+    private SharePermissionEntity findExistingGrant(
+            SharePermissionEntity.ResourceType resourceType, Long resourceId, Long sourceApiKeyId,
+            SharePermissionEntity.TargetType targetType, String targetUserId, Long targetApiKeyId) {
+        return sharePermissionRepository
+                .findAllByResourceTypeAndResourceIdAndSourceApiKeyId(resourceType, resourceId, sourceApiKeyId)
+                .stream()
+                .filter(existing -> existing.getTargetType() == targetType)
+                .filter(existing -> targetType == SharePermissionEntity.TargetType.USER
+                        ? java.util.Objects.equals(existing.getTargetUserId(), targetUserId)
+                        : java.util.Objects.equals(existing.getTargetApiKeyId(), targetApiKeyId))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static <E extends Enum<E>> E enumOf(Class<E> type, String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Enum.valueOf(type, value.trim());
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 

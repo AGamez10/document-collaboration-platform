@@ -42,11 +42,13 @@ import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
 import com.officeplatform.entity.KnownUserEntity;
+import com.officeplatform.entity.SharePermissionEntity;
 import com.officeplatform.exception.StorageException;
 import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.KnownUserRepository;
+import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.storage.StorageService;
 
 import lombok.extern.slf4j.Slf4j;
@@ -62,6 +64,7 @@ public class BackupServiceImpl implements BackupService {
     private final FolderRepository folderRepository;
     private final ApiKeyRepository apiKeyRepository;
     private final KnownUserRepository knownUserRepository;
+    private final SharePermissionRepository sharePermissionRepository;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
     private final BackupRestoreService backupRestoreService;
@@ -79,6 +82,7 @@ public class BackupServiceImpl implements BackupService {
             FolderRepository folderRepository,
             ApiKeyRepository apiKeyRepository,
             KnownUserRepository knownUserRepository,
+            SharePermissionRepository sharePermissionRepository,
             StorageService storageService,
             @Value("${office-platform.backup.directory:backups}") String backupDirectoryPath,
             @Value("${office-platform.backup.auto-enabled:true}") boolean autoBackupEnabled,
@@ -95,6 +99,7 @@ public class BackupServiceImpl implements BackupService {
         this.folderRepository = folderRepository;
         this.apiKeyRepository = apiKeyRepository;
         this.knownUserRepository = knownUserRepository;
+        this.sharePermissionRepository = sharePermissionRepository;
         this.storageService = storageService;
 
         this.backupDirectoryPath = backupDirectoryPath;
@@ -179,6 +184,7 @@ public class BackupServiceImpl implements BackupService {
         List<FolderEntity> allFolders = folderRepository.findAll();
         List<ApiKeyEntity> allApiKeys = apiKeyRepository.findAll();
         List<KnownUserEntity> allUsers = knownUserRepository.findAll();
+        List<SharePermissionEntity> allSharePermissions = sharePermissionRepository.findAll();
 
         // Las rutas se resuelven antes de escribir nada porque el manifest va primero en el ZIP y
         // tiene que declarar dónde quedó cada binario.
@@ -195,6 +201,21 @@ public class BackupServiceImpl implements BackupService {
             }
         }
 
+        // El nombre visible de cada persona, para que la carpeta del ZIP diga "1004356866 - Ana
+        // Pérez" y no una cédula suelta que nadie reconoce al abrir el paquete.
+        Map<String, String> displayNames = new HashMap<>();
+        for (KnownUserEntity user : allUsers) {
+            if (user.getUserId() == null) {
+                continue;
+            }
+            String name = user.getDisplayName();
+            if (name == null || name.isBlank()) {
+                continue;
+            }
+            displayNames.put(user.getApiKeyId() + "|" + user.getUserId().trim(), name);
+            displayNames.putIfAbsent(user.getUserId().trim(), name);
+        }
+
         Set<String> usedPaths = new HashSet<>();
         Map<Long, String> pathByFileId = new HashMap<>();
         List<Map<String, Object>> filesMetadata = new ArrayList<>(allFiles.size());
@@ -202,7 +223,7 @@ public class BackupServiceImpl implements BackupService {
             @SuppressWarnings("unchecked")
             Map<String, Object> node = objectMapper.convertValue(file, Map.class);
             if (file.getObjectName() != null && !file.getObjectName().isBlank()) {
-                String entryPath = buildHierarchicalPath(file, foldersById, apiKeysById, usedPaths);
+                String entryPath = buildHierarchicalPath(file, foldersById, apiKeysById, displayNames, usedPaths);
                 node.put("zipEntryPath", entryPath);
                 if (file.getId() != null) {
                     pathByFileId.put(file.getId(), entryPath);
@@ -211,19 +232,31 @@ public class BackupServiceImpl implements BackupService {
             filesMetadata.add(node);
         }
 
+        // Vista de contingencia: copias de lo que a cada persona le compartieron, para que al abrir
+        // el ZIP sin servidor encuentre en su propia carpeta lo que en el gestor ve bajo
+        // "Compartidos conmigo". Estas rutas NO viajan en filesMetadata a propósito: son copias
+        // para el humano, y declararlas haría que la restauración duplicara filas y objetos.
+        Map<Long, List<String>> sharedCopies = buildSharedWithMeCopies(
+                allSharePermissions, allFiles, foldersById, apiKeysById, displayNames, usedPaths);
+
         Map<String, Object> manifest = new HashMap<>();
         manifest.put("backupType", type);
         manifest.put("createdAt", now.toString());
-        // Marca de formato: el restaurador la usa para saber que puede confiar en zipEntryPath.
-        manifest.put("layoutVersion", 2);
+        // Marca de formato: 2 introdujo zipEntryPath, 3 agrega los permisos y la segmentación por
+        // usuario. El restaurador la lee para saber en qué puede confiar.
+        manifest.put("layoutVersion", 3);
         manifest.put("totalFiles", allFiles.size());
         manifest.put("totalFolders", allFolders.size());
         manifest.put("totalApiKeys", allApiKeys.size());
         manifest.put("totalKnownUsers", allUsers.size());
+        manifest.put("totalSharePermissions", allSharePermissions.size());
         manifest.put("filesMetadata", filesMetadata);
         manifest.put("foldersMetadata", allFolders);
         manifest.put("apiKeysMetadata", allApiKeys);
         manifest.put("knownUsersMetadata", allUsers);
+        // Sin esto, restaurar devolvía los archivos pero abría el acceso: cada restricción, nota y
+        // vencimiento desaparecía, y lo que estaba limitado a una persona quedaba a la vista.
+        manifest.put("sharePermissionsMetadata", allSharePermissions);
 
         int writtenFiles = 0;
         try (FileOutputStream fos = new FileOutputStream(zipPath.toFile());
@@ -247,11 +280,28 @@ public class BackupServiceImpl implements BackupService {
                 if (entryPath == null) {
                     entryPath = "archivos/_sin_ubicacion/" + safeName(file.getObjectName());
                 }
+                List<String> copies = file.getId() == null
+                        ? List.of() : sharedCopies.getOrDefault(file.getId(), List.of());
                 try (InputStream stream = storageService.retrieve(file.getObjectName())) {
-                    ZipEntry fileEntry = new ZipEntry(entryPath);
-                    zos.putNextEntry(fileEntry);
-                    stream.transferTo(zos);
-                    zos.closeEntry();
+                    if (copies.isEmpty()) {
+                        // Sin copias se transfiere en streaming: no hay motivo para cargar en
+                        // memoria un archivo que se escribe una sola vez.
+                        zos.putNextEntry(new ZipEntry(entryPath));
+                        stream.transferTo(zos);
+                        zos.closeEntry();
+                    } else {
+                        // Con copias hay que leerlo una vez y escribirlo varias: volver a pedirlo a
+                        // MinIO por cada destinatario multiplicaría las descargas sin ganar nada.
+                        byte[] content = stream.readAllBytes();
+                        zos.putNextEntry(new ZipEntry(entryPath));
+                        zos.write(content);
+                        zos.closeEntry();
+                        for (String copy : copies) {
+                            zos.putNextEntry(new ZipEntry(copy));
+                            zos.write(content);
+                            zos.closeEntry();
+                        }
+                    }
                     writtenFiles++;
                 } catch (Exception ex) {
                     log.warn("No se pudo incluir el archivo binario {} en el backup: {}", file.getObjectName(), ex.getMessage());
@@ -285,6 +335,13 @@ public class BackupServiceImpl implements BackupService {
     /** Profundidad máxima de carpetas que se recorre antes de asumir que la cadena está rota. */
     private static final int MAX_FOLDER_DEPTH = 32;
 
+    // Tramos fijos del árbol del ZIP. Reproducen las secciones del gestor para que abrir el
+    // paquete en el Explorador se parezca a mirar la aplicación.
+    private static final String AREA_SEGMENT = "Compartidos por Area";
+    private static final String USERS_SEGMENT = "Usuarios";
+    private static final String MY_FILES_SEGMENT = "Mis Archivos";
+    private static final String SHARED_WITH_ME_SEGMENT = "Compartidos conmigo";
+
     /**
      * Ruta legible donde vive el binario de un archivo dentro del ZIP.
      *
@@ -299,31 +356,66 @@ public class BackupServiceImpl implements BackupService {
     private String buildHierarchicalPath(FileEntity file,
                                          Map<Long, FolderEntity> foldersMap,
                                          Map<Long, ApiKeyEntity> apiKeysMap,
+                                         Map<String, String> displayNames,
                                          Set<String> usedPaths) {
         StringBuilder path = new StringBuilder("archivos/");
+        path.append(projectSegment(file.getApiKeyId(), apiKeysMap)).append('/');
 
-        ApiKeyEntity project = file.getApiKeyId() == null ? null : apiKeysMap.get(file.getApiKeyId());
-        String projectName = project == null ? null : project.getName();
-        if (projectName == null || projectName.isBlank()) {
-            projectName = file.getApiKeyId() == null ? "sin-proyecto" : "proyecto-" + file.getApiKeyId();
+        // La segmentación copia lo que la persona ve en el gestor. Un archivo sin userId vive en el
+        // espacio compartido del área; uno con userId es privado de esa persona, y mezclarlos en la
+        // misma carpeta del ZIP haría que un respaldo abierto en Windows exponga lo de cada uno
+        // junto a lo de todos.
+        boolean shared = file.getUserId() == null;
+        if (shared) {
+            path.append(AREA_SEGMENT).append('/');
+        } else {
+            path.append(USERS_SEGMENT).append('/')
+                .append(userFolderName(file.getUserId(), file.getApiKeyId(), displayNames)).append('/')
+                .append(MY_FILES_SEGMENT).append('/');
         }
-        path.append(safeName(projectName)).append('/');
 
-        for (String segment : folderChain(file.getFolderId(), foldersMap)) {
+        for (String segment : folderChain(file.getFolderId(), foldersMap, shared)) {
             path.append(segment).append('/');
         }
 
-        String name = file.getOriginalFileName();
-        if (name == null || name.isBlank()) {
-            name = file.getObjectName();
-        }
-        path.append(safeName(name));
-
+        path.append(safeName(readableName(file)));
         return deduplicate(path.toString(), usedPaths);
     }
 
-    /** Segmentos de carpeta desde la raíz hasta la que contiene el archivo, ya saneados. */
-    private List<String> folderChain(Long folderId, Map<Long, FolderEntity> foldersMap) {
+    /** Nombre del proyecto tal como se muestra, o un marcador estable si ya no existe. */
+    private static String projectSegment(Long apiKeyId, Map<Long, ApiKeyEntity> apiKeysMap) {
+        ApiKeyEntity project = apiKeyId == null ? null : apiKeysMap.get(apiKeyId);
+        String name = project == null ? null : project.getName();
+        if (name == null || name.isBlank()) {
+            return safeName(apiKeyId == null ? "sin-proyecto" : "proyecto-" + apiKeyId);
+        }
+        return safeName(name);
+    }
+
+    /** "1004356866 - Ana Pérez", o solo la cédula cuando no se conoce el nombre. */
+    private static String userFolderName(String userId, Long apiKeyId, Map<String, String> displayNames) {
+        String trimmed = userId == null ? "" : userId.trim();
+        String name = displayNames.get(apiKeyId + "|" + trimmed);
+        if (name == null) {
+            name = displayNames.get(trimmed);
+        }
+        return (name == null || name.isBlank())
+                ? safeName(trimmed)
+                : safeName(trimmed) + " - " + safeName(name);
+    }
+
+    private static String readableName(FileEntity file) {
+        String name = file.getOriginalFileName();
+        return (name == null || name.isBlank()) ? file.getObjectName() : name;
+    }
+
+    /**
+     * Segmentos de carpeta desde la raíz hasta la que contiene el archivo, ya saneados.
+     *
+     * @param sharedSegment cuando es true se omiten las carpetas privadas de la cadena: el tramo
+     *                      del área no debe llevar el nombre de la carpeta personal de nadie
+     */
+    private List<String> folderChain(Long folderId, Map<Long, FolderEntity> foldersMap, boolean sharedSegment) {
         List<String> chain = new ArrayList<>();
         Set<Long> seen = new HashSet<>();
         Long current = folderId;
@@ -334,11 +426,99 @@ public class BackupServiceImpl implements BackupService {
             if (folder == null) {
                 break;
             }
-            chain.add(safeName(folder.getName()));
+            if (!sharedSegment || folder.getUserId() == null) {
+                chain.add(safeName(folder.getName()));
+            }
             current = folder.getParentId();
         }
         Collections.reverse(chain);
         return chain;
+    }
+
+    /**
+     * Rutas extra donde copiar cada binario para reconstruir "Compartidos conmigo" dentro del ZIP.
+     *
+     * <p>Solo se atienden los permisos dirigidos a una persona. Un permiso sobre una carpeta se
+     * expande a los archivos que contiene, porque quien abre el paquete busca los documentos, no la
+     * carpeta vacía. Los permisos a nivel de proyecto quedan fuera a propósito: replicarlos
+     * duplicaría el paquete entero sin darle nada nuevo a nadie.
+     *
+     * @return rutas adicionales por id de archivo
+     */
+    private Map<Long, List<String>> buildSharedWithMeCopies(
+            List<SharePermissionEntity> permissions,
+            List<FileEntity> allFiles,
+            Map<Long, FolderEntity> foldersMap,
+            Map<Long, ApiKeyEntity> apiKeysMap,
+            Map<String, String> displayNames,
+            Set<String> usedPaths) {
+
+        Map<Long, List<String>> copies = new HashMap<>();
+        if (permissions == null || permissions.isEmpty()) {
+            return copies;
+        }
+        Map<Long, FileEntity> filesById = new HashMap<>();
+        Map<Long, List<FileEntity>> filesByFolder = new HashMap<>();
+        for (FileEntity file : allFiles) {
+            if (file.getId() != null) {
+                filesById.put(file.getId(), file);
+            }
+            if (file.getFolderId() != null) {
+                filesByFolder.computeIfAbsent(file.getFolderId(), k -> new ArrayList<>()).add(file);
+            }
+        }
+
+        for (SharePermissionEntity permission : permissions) {
+            if (permission.getTargetType() != SharePermissionEntity.TargetType.USER
+                    || permission.getTargetUserId() == null
+                    || permission.getTargetUserId().isBlank()
+                    || permission.getResourceId() == null) {
+                continue;
+            }
+            List<FileEntity> shared = permission.getResourceType() == SharePermissionEntity.ResourceType.FILE
+                    ? oneFile(filesById.get(permission.getResourceId()))
+                    : filesUnder(permission.getResourceId(), foldersMap, filesByFolder);
+
+            for (FileEntity file : shared) {
+                if (file.getId() == null || file.getObjectName() == null || file.getObjectName().isBlank()) {
+                    continue;
+                }
+                String path = "archivos/" + projectSegment(file.getApiKeyId(), apiKeysMap)
+                        + "/" + USERS_SEGMENT
+                        + "/" + userFolderName(permission.getTargetUserId(), permission.getSourceApiKeyId(), displayNames)
+                        + "/" + SHARED_WITH_ME_SEGMENT
+                        + "/" + safeName(readableName(file));
+                copies.computeIfAbsent(file.getId(), k -> new ArrayList<>())
+                        .add(deduplicate(path, usedPaths));
+            }
+        }
+        return copies;
+    }
+
+    private static List<FileEntity> oneFile(FileEntity file) {
+        return file == null ? List.of() : List.of(file);
+    }
+
+    /** Archivos contenidos en una carpeta y en todo su subárbol. */
+    private static List<FileEntity> filesUnder(Long folderId,
+                                               Map<Long, FolderEntity> foldersMap,
+                                               Map<Long, List<FileEntity>> filesByFolder) {
+        List<FileEntity> found = new ArrayList<>();
+        Set<Long> visited = new HashSet<>();
+        List<Long> queue = new ArrayList<>(List.of(folderId));
+        while (!queue.isEmpty()) {
+            Long current = queue.remove(queue.size() - 1);
+            if (!visited.add(current)) {
+                continue;
+            }
+            found.addAll(filesByFolder.getOrDefault(current, List.of()));
+            for (FolderEntity folder : foldersMap.values()) {
+                if (current.equals(folder.getParentId()) && folder.getId() != null) {
+                    queue.add(folder.getId());
+                }
+            }
+        }
+        return found;
     }
 
     /**

@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -39,10 +40,12 @@ import com.officeplatform.dto.response.BackupRestoreResponse;
 import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
+import com.officeplatform.entity.SharePermissionEntity;
 import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.KnownUserRepository;
+import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.storage.StorageService;
 
 /**
@@ -65,6 +68,7 @@ class BackupRestoreServiceTest {
     @Mock private FolderRepository folderRepository;
     @Mock private ApiKeyRepository apiKeyRepository;
     @Mock private KnownUserRepository knownUserRepository;
+    @Mock private SharePermissionRepository sharePermissionRepository;
     @Mock private StorageService storageService;
     @Mock private PlatformTransactionManager transactionManager;
 
@@ -76,6 +80,7 @@ class BackupRestoreServiceTest {
     private final Map<String, FileEntity> filesByUuid = new LinkedHashMap<>();
     private final List<ApiKeyEntity> apiKeys = new ArrayList<>();
     private final Map<String, byte[]> stored = new LinkedHashMap<>();
+    private final List<SharePermissionEntity> savedGrants = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -127,8 +132,26 @@ class BackupRestoreServiceTest {
             return null;
         }).when(storageService).store(anyString(), any(), anyLong(), anyString());
 
+        AtomicLong grantSeq = new AtomicLong(3000);
+        lenient().when(sharePermissionRepository.save(any(SharePermissionEntity.class))).thenAnswer(i -> {
+            SharePermissionEntity g = i.getArgument(0);
+            if (g.getId() == null) {
+                g.setId(grantSeq.incrementAndGet());
+                savedGrants.add(g);
+            }
+            return g;
+        });
+        lenient().when(sharePermissionRepository
+                .findAllByResourceTypeAndResourceIdAndSourceApiKeyId(any(), anyLong(), anyLong()))
+                .thenAnswer(i -> savedGrants.stream()
+                        .filter(g -> g.getResourceType() == i.getArgument(0))
+                        .filter(g -> i.getArgument(1).equals(g.getResourceId()))
+                        .filter(g -> i.getArgument(2).equals(g.getSourceApiKeyId()))
+                        .toList());
+
         service = new BackupRestoreService(fileRepository, folderRepository, apiKeyRepository,
-                knownUserRepository, storageService, objectMapper, transactionManager, BUCKET);
+                knownUserRepository, sharePermissionRepository, storageService, objectMapper,
+                transactionManager, BUCKET);
     }
 
     // ── package builders ─────────────────────────────────────────────────────
@@ -338,6 +361,127 @@ class BackupRestoreServiceTest {
         assertThat(result.getBinariesSkipped()).isEqualTo(1);
         assertThat(result.getWarnings()).anyMatch(w -> w.contains("informe.docx"));
         verify(storageService, never()).store(anyString(), any(), anyLong(), anyString());
+    }
+
+    // ── permisos ─────────────────────────────────────────────────────────────
+
+    private Map<String, Object> grantNode(String resourceType, long resourceId, long sourceApiKeyId,
+                                          String targetType, String targetUserId, Long targetApiKeyId,
+                                          String level) {
+        Map<String, Object> n = new HashMap<>();
+        n.put("id", 500L);
+        n.put("resourceType", resourceType);
+        n.put("resourceId", resourceId);
+        n.put("sourceApiKeyId", sourceApiKeyId);
+        n.put("targetType", targetType);
+        n.put("targetUserId", targetUserId);
+        n.put("targetApiKeyId", targetApiKeyId);
+        n.put("permissionLevel", level);
+        n.put("sharedByUserId", "111");
+        n.put("sharedByName", "Beto");
+        n.put("notes", "Solo para revisión");
+        n.put("createdAt", "2026-01-15T10:30:00");
+        n.put("expiresAt", "2026-12-31T23:59:00");
+        return n;
+    }
+
+    @Test
+    @DisplayName("a grant is re-linked to the id the file actually got in this database")
+    void relinksAGrantToTheRestoredFileId() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        // El permiso apunta al id 31 del respaldo; acá el archivo recibe otro id.
+        manifest.put("sharePermissionsMetadata", List.of(
+                grantNode("FILE", 31L, 3L, "USER", "1004356866", null, "DOWNLOAD")));
+
+        service.restore(new ByteArrayInputStream(packageOf(manifest, Map.of(
+                "archivos/Proyecto X/Informes/Semana 36/informe.docx", "contenido"))), "paquete.zip");
+
+        SharePermissionEntity saved = savedGrants.get(0);
+        assertThat(saved.getResourceId()).isEqualTo(filesByUuid.get("uuid-archivo").getId());
+        assertThat(saved.getResourceType()).isEqualTo(SharePermissionEntity.ResourceType.FILE);
+        assertThat(saved.getPermissionLevel()).isEqualTo(SharePermissionEntity.PermissionLevel.DOWNLOAD);
+        assertThat(saved.getTargetUserId()).isEqualTo("1004356866");
+    }
+
+    @Test
+    @DisplayName("notes, expiry and authorship survive the round trip")
+    void preservesTheDetailsOfAGrant() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        manifest.put("sharePermissionsMetadata", List.of(
+                grantNode("FOLDER", 20L, 3L, "USER", "1004356866", null, "EDIT")));
+
+        BackupRestoreResponse result = service.restore(
+                new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        SharePermissionEntity saved = savedGrants.get(0);
+        assertThat(saved.getResourceId()).isEqualTo(foldersByUuid.get("uuid-padre").getId());
+        assertThat(saved.getNotes()).isEqualTo("Solo para revisión");
+        assertThat(saved.getExpiresAt()).isEqualTo(LocalDateTime.of(2026, 12, 31, 23, 59));
+        assertThat(saved.getCreatedAt()).isEqualTo(LocalDateTime.of(2026, 1, 15, 10, 30));
+        assertThat(saved.getSharedByName()).isEqualTo("Beto");
+        assertThat(result.getSharePermissionsCreated()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("an existing grant is updated in place instead of duplicated")
+    void updatesAnExistingGrantInsteadOfDuplicating() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        manifest.put("sharePermissionsMetadata", List.of(
+                grantNode("FILE", 31L, 3L, "USER", "1004356866", null, "EDIT")));
+
+        // Primera restauración crea la regla; la segunda tiene que encontrarla.
+        byte[] zip = packageOf(manifest, Map.of());
+        service.restore(new ByteArrayInputStream(zip), "paquete.zip");
+        BackupRestoreResponse second = service.restore(new ByteArrayInputStream(zip), "paquete.zip");
+
+        assertThat(savedGrants).hasSize(1);
+        assertThat(second.getSharePermissionsUpdated()).isEqualTo(1);
+        assertThat(second.getSharePermissionsCreated()).isZero();
+    }
+
+    @Test
+    @DisplayName("a grant over a resource that is not in the package is dropped, not misapplied")
+    void dropsAGrantWhoseResourceIsMissing() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        // El id 999 no existe en el paquete: aplicarlo abriría un recurso ajeno.
+        manifest.put("sharePermissionsMetadata", List.of(
+                grantNode("FILE", 999L, 3L, "USER", "1004356866", null, "EDIT")));
+
+        BackupRestoreResponse result = service.restore(
+                new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        assertThat(savedGrants).isEmpty();
+        assertThat(result.getSharePermissionsCreated()).isZero();
+        assertThat(result.getWarnings()).anyMatch(w -> w.contains("Permiso omitido"));
+    }
+
+    @Test
+    @DisplayName("a project-wide grant is re-linked through the api key mapping")
+    void relinksAProjectGrant() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        manifest.put("apiKeysMetadata", List.of(
+                apiKeyNode(3L, "clave-proyecto-x", "Proyecto X"),
+                apiKeyNode(4L, "clave-proyecto-y", "Proyecto Y")));
+        manifest.put("sharePermissionsMetadata", List.of(
+                grantNode("FILE", 31L, 3L, "PROJECT", null, 4L, "VIEW")));
+
+        service.restore(new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        SharePermissionEntity saved = savedGrants.get(0);
+        assertThat(saved.getTargetType()).isEqualTo(SharePermissionEntity.TargetType.PROJECT);
+        assertThat(saved.getTargetApiKeyId()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a legacy package with no grants restores without touching permissions")
+    void restoresALegacyPackageWithNoGrants() throws Exception {
+        // Un paquete de la versión 1 no trae sharePermissionsMetadata: no debe fallar ni borrar.
+        BackupRestoreResponse result = service.restore(
+                new ByteArrayInputStream(packageOf(hierarchicalManifest(), Map.of())), "legado.zip");
+
+        assertThat(savedGrants).isEmpty();
+        assertThat(result.getSharePermissionsCreated()).isZero();
+        assertThat(result.getFoldersCreated()).isEqualTo(2);
     }
 
     @Test
