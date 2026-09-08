@@ -68,10 +68,14 @@ public class FolderServiceImpl implements FolderService {
         String trimmedName = validateName(name);
 
         String folderUserId = null;
+        Long effectiveApiKeyId = apiKeyId;
         if (parentId != null) {
-            FolderEntity parent = folderRepository.findByIdAndApiKeyId(parentId, apiKeyId)
+            // Sin restringir al proyecto del llamador: el controller ya exigió EDIT sobre la
+            // carpeta padre, y volver a filtrar acá anulaba ese permiso.
+            FolderEntity parent = folderRepository.findById(parentId)
                     .orElseThrow(() -> new FolderNotFoundException(parentId));
             folderUserId = parent.getUserId();
+            effectiveApiKeyId = parent.getApiKeyId();
         } else {
             if ("private".equalsIgnoreCase(scope)) {
                 if (userId == null || userId.isBlank()) {
@@ -87,7 +91,7 @@ public class FolderServiceImpl implements FolderService {
                 .uuid(UUID.randomUUID().toString())
                 .name(trimmedName)
                 .parentId(parentId)
-                .apiKeyId(apiKeyId)
+                .apiKeyId(effectiveApiKeyId)
                 .userId(folderUserId)
                 .createdByName(effectiveUserName)
                 .createdByUserId(userId)
@@ -200,13 +204,20 @@ public class FolderServiceImpl implements FolderService {
     @Override
     @Transactional
     public FileEntity moveFile(Long fileId, Long folderId, Long apiKeyId, String userId, String userName, String scope) {
+        // El controller ya exigió EDIT sobre el archivo y sobre la carpeta destino; restringir
+        // acá al proyecto del llamador impedía mover un archivo que le compartieron.
         FileEntity file = fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNull(fileId, apiKeyId)
+                .or(() -> fileRepository.findByIdAndDeletedAtIsNull(fileId))
                 .orElseThrow(() -> new FileNotFoundException(fileId));
 
         if (folderId != null) {
-            FolderEntity folder = folderRepository.findByIdAndApiKeyId(folderId, apiKeyId)
+            // Sin filtrar por el proyecto del llamador: el controller ya exigió EDIT sobre la
+            // carpeta destino. El archivo pasa a pertenecer al proyecto y al espacio de esa
+            // carpeta, que es lo que lo vuelve visible para quienes la comparten.
+            FolderEntity folder = folderRepository.findById(folderId)
                     .orElseThrow(() -> new FolderNotFoundException(folderId));
             file.setUserId(folder.getUserId());
+            file.setApiKeyId(folder.getApiKeyId());
         } else {
             if ("shared".equalsIgnoreCase(scope)) {
                 file.setUserId(null);

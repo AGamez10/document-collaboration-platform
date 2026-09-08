@@ -21,6 +21,9 @@ public interface BackupService {
 
     BackupConfigResponse updateConfig(BackupConfigRequest request);
 
+    /** Comprueba que una ruta de destino exista (o pueda crearse) y admita escritura real. */
+    com.officeplatform.dto.response.PathValidationResponse validatePath(String path);
+
     /** Restores a package already stored in the backup directory. */
     com.officeplatform.dto.response.BackupRestoreResponse restoreBackup(String fileName);
 

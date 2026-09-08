@@ -232,10 +232,11 @@ public class FileServiceImpl implements FileService {
         }
 
         String fileUserId = null;
+        Long effectiveApiKeyId = apiKeyId;
         if (folderId != null) {
-            FolderEntity parent = folderRepository.findByIdAndApiKeyId(folderId, apiKeyId)
-                    .orElseThrow(() -> new FolderNotFoundException(folderId));
+            FolderEntity parent = resolveContainingFolder(folderId);
             fileUserId = parent.getUserId();
+            effectiveApiKeyId = parent.getApiKeyId();
         } else {
             if ("private".equalsIgnoreCase(scope)) {
                 if (userId == null || userId.isBlank()) {
@@ -256,7 +257,7 @@ public class FileServiceImpl implements FileService {
             .mimeType(contentType)
             .extension(extension)
             .size(file.getSize())
-            .apiKeyId(apiKeyId)
+            .apiKeyId(effectiveApiKeyId)
             .folderId(folderId)
             .userId(fileUserId)
             .createdByName(effectiveUserName)
@@ -301,10 +302,11 @@ public class FileServiceImpl implements FileService {
                 mimeType);
 
         String fileUserId = null;
+        Long effectiveApiKeyId = apiKeyId;
         if (folderId != null) {
-            FolderEntity parent = folderRepository.findByIdAndApiKeyId(folderId, apiKeyId)
-                    .orElseThrow(() -> new FolderNotFoundException(folderId));
+            FolderEntity parent = resolveContainingFolder(folderId);
             fileUserId = parent.getUserId();
+            effectiveApiKeyId = parent.getApiKeyId();
         } else {
             if ("private".equalsIgnoreCase(scope)) {
                 if (userId == null || userId.isBlank()) {
@@ -325,7 +327,7 @@ public class FileServiceImpl implements FileService {
             .mimeType(mimeType)
             .extension(extension)
             .size((long) content.length)
-            .apiKeyId(apiKeyId)
+            .apiKeyId(effectiveApiKeyId)
             .folderId(folderId)
             .userId(fileUserId)
             .createdByName(effectiveUserName)
@@ -527,6 +529,23 @@ public class FileServiceImpl implements FileService {
         activityLogRecorder.record(fileEntity.getApiKeyId(), null, null, ActivityAction.DOWNLOAD,
                 fileEntity.getId(), fileEntity.getOriginalFileName(), null, fileEntity.getFolderId());
         return storageService.retrieve(fileEntity.getObjectName());
+    }
+
+
+    /**
+     * Resolves the containing folder for something being created inside it.
+     *
+     * <p>Deliberately NOT scoped to the caller's project. Authorisation already happened in the
+     * controller, which requires EDIT on the folder; repeating the check here as
+     * {@code findByIdAndApiKeyId} was a second, stricter rule that cancelled the first — someone
+     * granted EDIT on a folder of another project could not upload a single file into it.
+     *
+     * <p>The new item belongs to the folder's project and inherits its space, not the caller's:
+     * a file dropped into a shared folder has to be reachable by the people who share that folder.
+     */
+    private FolderEntity resolveContainingFolder(Long folderId) {
+        return folderRepository.findById(folderId)
+                .orElseThrow(() -> new FolderNotFoundException(folderId));
     }
 
 }

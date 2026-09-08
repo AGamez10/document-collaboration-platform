@@ -156,6 +156,16 @@ code { font-family: var(--op-font-mono); }
   border-color: #f59e0b;
 }
 
+/* ── Configuración de rutas de respaldo ─────────────────────── */
+.op-path-row { display: flex; gap: 8px; align-items: stretch; }
+.op-path-row input { flex: 1 1 auto; min-width: 0; }
+.op-path-row .op-btn { flex: 0 0 auto; white-space: nowrap; }
+/* El resultado de la verificación se pinta sobre el propio hint, para que quede
+   pegado al campo que describe en vez de en un cartel aparte. */
+.op-field__hint.is-ok { color: #22c55e; font-weight: 600; }
+.op-field__hint.is-error { color: var(--op-color-danger); font-weight: 600; }
+
+
 .op-btn--danger {
   background: var(--op-color-danger-light);
   color: var(--op-color-danger);

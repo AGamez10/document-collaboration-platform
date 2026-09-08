@@ -674,4 +674,9 @@ public class AdminServiceImpl implements AdminService {
     public BackupInfoResponse storeUploadedBackup(String originalName, java.io.InputStream zipStream) {
         return backupService.storeUploadedBackup(originalName, zipStream);
     }
+
+    @Override
+    public com.officeplatform.dto.response.PathValidationResponse validateBackupPath(String path) {
+        return backupService.validatePath(path);
+    }
 }

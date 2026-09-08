@@ -36,10 +36,13 @@ public class FolderController {
 
     private final FolderService folderService;
     private final ShareService shareService;
+    private final com.officeplatform.service.notification.NotificationService notificationService;
 
-    public FolderController(FolderService folderService, ShareService shareService) {
+    public FolderController(FolderService folderService, ShareService shareService,
+                            com.officeplatform.service.notification.NotificationService notificationService) {
         this.folderService = folderService;
         this.shareService = shareService;
+        this.notificationService = notificationService;
     }
 
     @PostMapping
@@ -80,6 +83,12 @@ public class FolderController {
         List<FolderResponse> folders = folderService.listFolders(parentId, principal.getApiKeyId(), principal.resolveUserId(null), scope).stream()
                 .map(this::toFolderResponse)
                 .toList();
+
+        // Entrar a una carpeta ajena avisa a su autor. El servicio aplica una ventana de
+        // silencio de 5 minutos: navegar dispara un listado por cada carpeta que se abre.
+        if (parentId != null) {
+            notifyFolderOpened(parentId, principal);
+        }
 
         // Additive permission filter over the shared space only (does not touch the listing query).
         if ("shared".equalsIgnoreCase(scope)) {
@@ -212,6 +221,25 @@ public class FolderController {
                 .build();
 
         return ResponseEntity.ok(response);
+    }
+
+    /** Avisa al autor de la carpeta que otra persona la abrió. Silencioso ante fallos. */
+    private void notifyFolderOpened(Long folderId, ApiKeyPrincipal principal) {
+        try {
+            com.officeplatform.entity.FolderEntity folder = folderService.getFolder(folderId, principal.getApiKeyId());
+            String owner = (folder.getCreatedByUserId() != null && !folder.getCreatedByUserId().isBlank())
+                    ? folder.getCreatedByUserId()
+                    : folder.getUserId();
+            String actor = principal.resolveUserId(null);
+            String actorName = principal.resolveUserName(null);
+            String who = (actorName != null && !actorName.isBlank()) ? actorName : actor;
+            notificationService.notifyResourceAction(
+                    owner, actor, who, folder.getId(), "FOLDER",
+                    "Carpeta visualizada",
+                    who + " abrió tu carpeta '" + folder.getName() + "'");
+        } catch (RuntimeException ignored) {
+            // Listar carpetas no puede fallar porque no se pudo notificar.
+        }
     }
 
     private FolderResponse toFolderResponse(FolderEntity entity) {

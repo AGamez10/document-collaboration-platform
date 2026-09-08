@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="admin.css?v=2.9" />
+  <link rel="stylesheet" href="admin.css?v=3.0" />
 </head>
 <body>
   <div id="op-admin-root" class="op-admin">
@@ -599,8 +599,11 @@
 
         <label class="op-field">
           <span>Directorio Local de Respaldo</span>
-          <input type="text" id="op-cfg-backup-dir" placeholder="backups  o  D:\OfficePlatformBackups" />
-          <small class="op-field__hint">Ruta donde se escriben los paquetes ZIP. Dejar vacío conserva la actual.</small>
+          <div class="op-path-row">
+            <input type="text" id="op-cfg-backup-dir" placeholder="backups  o  G:\Backups_Centralizados" />
+            <button type="button" id="op-verify-backup-dir" class="op-btn op-btn--sm op-btn--ghost">Verificar</button>
+          </div>
+          <small class="op-field__hint" id="op-backup-dir-status">Ruta donde se escriben los paquetes ZIP. Dejar vacío conserva la actual.</small>
         </label>
 
         <label class="op-field">

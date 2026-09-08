@@ -258,6 +258,25 @@ public class EditorServiceImpl implements EditorService {
         String userId = (users != null && !users.isEmpty()) ? users.get(0) : null;
         activityLogRecorder.record(fileEntity.getApiKeyId(), userId, updatedByName, ActivityAction.EDITOR_SAVE,
                 fileEntity.getId(), fileEntity.getOriginalFileName(), "users: " + users, fileEntity.getFolderId());
+
+        // Guardar cambios en un documento ajeno es más relevante que abrirlo, así que también
+        // se avisa. Secundario como siempre: nunca debe hacer fallar el guardado en sí.
+        try {
+            String editorName = (updatedByName != null && !updatedByName.isBlank())
+                    ? updatedByName : userId;
+            notificationService.notifyResourceAction(
+                    resolveFileOwner(fileEntity),
+                    userId,
+                    editorName,
+                    fileEntity.getId(),
+                    "FILE",
+                    "Documento editado",
+                    editorName + " editó y guardó cambios en tu documento '"
+                            + fileEntity.getOriginalFileName() + "'");
+        } catch (RuntimeException e) {
+            log.warn("No se pudo notificar la edición del archivo {}: {}",
+                    fileEntity.getId(), e.getMessage());
+        }
     }
 
     @Override

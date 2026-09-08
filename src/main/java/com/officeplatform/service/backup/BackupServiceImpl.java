@@ -477,4 +477,76 @@ public class BackupServiceImpl implements BackupService {
         }
         return "backup_externo_" + LocalDateTime.now().format(BACKUP_FILE_DATE_FORMAT) + "_" + base;
     }
+
+    /**
+     * Checks a destination before it is saved.
+     *
+     * <p>Writes and deletes a probe file rather than trusting {@code Files.isWritable}: on a
+     * Windows network share that flag routinely reports true for a path the process cannot
+     * actually write to, and the failure would only surface when a backup silently stopped
+     * being produced.
+     */
+    @Override
+    public com.officeplatform.dto.response.PathValidationResponse validatePath(String rawPath) {
+        String candidate = (rawPath == null) ? "" : rawPath.trim();
+        if (candidate.isEmpty()) {
+            return com.officeplatform.dto.response.PathValidationResponse.builder()
+                    .valid(false).path(candidate)
+                    .message("Indicá una ruta de destino.")
+                    .build();
+        }
+
+        Path target;
+        try {
+            target = Paths.get(candidate).toAbsolutePath().normalize();
+        } catch (RuntimeException e) {
+            return com.officeplatform.dto.response.PathValidationResponse.builder()
+                    .valid(false).path(candidate)
+                    .message("La ruta no tiene un formato válido para este sistema.")
+                    .build();
+        }
+
+        boolean created = false;
+        if (!Files.exists(target)) {
+            try {
+                Files.createDirectories(target);
+                created = true;
+            } catch (IOException e) {
+                return com.officeplatform.dto.response.PathValidationResponse.builder()
+                        .valid(false).path(target.toString())
+                        .message("No se pudo crear el directorio: " + e.getMessage())
+                        .build();
+            }
+        } else if (!Files.isDirectory(target)) {
+            return com.officeplatform.dto.response.PathValidationResponse.builder()
+                    .valid(false).path(target.toString())
+                    .message("La ruta existe pero es un archivo, no un directorio.")
+                    .build();
+        }
+
+        Path probe = target.resolve(".office-platform-write-test");
+        try {
+            Files.writeString(probe, "ok");
+            Files.deleteIfExists(probe);
+        } catch (IOException e) {
+            return com.officeplatform.dto.response.PathValidationResponse.builder()
+                    .valid(false).path(target.toString()).created(created).writable(false)
+                    .message("El directorio existe pero no se puede escribir en él: " + e.getMessage())
+                    .build();
+        }
+
+        long free = target.toFile().getFreeSpace();
+        return com.officeplatform.dto.response.PathValidationResponse.builder()
+                .valid(true)
+                .path(target.toString())
+                .created(created)
+                .writable(true)
+                .freeSpaceBytes(free)
+                .formattedFreeSpace(formatBytes(free))
+                .message(created
+                        ? "Directorio creado y accesible. " + formatBytes(free) + " libres."
+                        : "Ruta accesible. " + formatBytes(free) + " libres.")
+                .build();
+    }
+
 }

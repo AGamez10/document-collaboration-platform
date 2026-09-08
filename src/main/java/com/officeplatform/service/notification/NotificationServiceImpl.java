@@ -1,7 +1,11 @@
 package com.officeplatform.service.notification;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -21,6 +25,24 @@ public class NotificationServiceImpl implements NotificationService {
 
     /** Enough to cover what anyone scrolls in a popover; older ones are noise. */
     private static final int MAX_NOTIFICATIONS = 30;
+
+    /**
+     * Window during which the same action by the same person on the same resource is not
+     * repeated. Listing a folder happens on every navigation, so without this a few minutes of
+     * browsing would produce dozens of identical entries and hide everything else.
+     */
+    private static final Duration COOLDOWN = Duration.ofMinutes(5);
+
+    /**
+     * Last time each (recipient, actor, resource, title) combination was recorded.
+     *
+     * <p>In memory on purpose: it is a debounce, not a fact worth persisting. Losing it on a
+     * restart costs at most one duplicate notification. Bounded so a long-running instance
+     * cannot grow it without limit.
+     */
+    private final Map<String, Instant> lastNotified = new ConcurrentHashMap<>();
+
+    private static final int MAX_COOLDOWN_ENTRIES = 5000;
 
     private final NotificationRepository notificationRepository;
 
@@ -60,6 +82,16 @@ public class NotificationServiceImpl implements NotificationService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void notifyResourceOpened(String ownerUserId, String actorUserId, String actorName,
                                      Long resourceId, String resourceType, String resourceName) {
+        String who = (actorName != null && !actorName.isBlank()) ? actorName.trim() : normalize(actorUserId);
+        String what = (resourceName != null && !resourceName.isBlank()) ? resourceName.trim() : "un documento";
+        notifyResourceAction(ownerUserId, actorUserId, actorName, resourceId, resourceType,
+                "Documento visualizado", who + " abrió tu documento '" + what + "'");
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void notifyResourceAction(String ownerUserId, String actorUserId, String actorName,
+                                     Long resourceId, String resourceType, String title, String message) {
         String owner = normalize(ownerUserId);
         String actor = normalize(actorUserId);
 
@@ -82,12 +114,27 @@ public class NotificationServiceImpl implements NotificationService {
         }
 
         String who = (actorName != null && !actorName.isBlank()) ? actorName.trim() : actor;
-        String what = (resourceName != null && !resourceName.isBlank()) ? resourceName.trim() : "un documento";
+
+        // Ventana de silencio: navegar por una carpeta dispara un listado por cada entrada.
+        String key = owner + '|' + actor + '|' + resourceType + '|' + resourceId + '|' + title;
+        Instant now = Instant.now();
+        Instant previous = lastNotified.get(key);
+        if (previous != null && Duration.between(previous, now).compareTo(COOLDOWN) < 0) {
+            log.debug("Notificación omitida por ventana de silencio: {} sobre {} {}",
+                    actor, resourceType, resourceId);
+            return;
+        }
+        if (lastNotified.size() >= MAX_COOLDOWN_ENTRIES) {
+            // Purga simple: el mapa es un debounce, no un registro. Vaciarlo solo puede
+            // provocar una notificación repetida, nunca una pérdida de información.
+            lastNotified.clear();
+        }
+        lastNotified.put(key, now);
 
         notificationRepository.save(NotificationEntity.builder()
                 .recipientUserId(owner)
-                .title("Documento visualizado")
-                .message(who + " abrió tu documento '" + what + "'")
+                .title(title)
+                .message(message)
                 .resourceId(resourceId)
                 .resourceType(resourceType)
                 .actorUserId(actor)
@@ -96,8 +143,8 @@ public class NotificationServiceImpl implements NotificationService {
                 .createdAt(LocalDateTime.now())
                 .build());
 
-        log.info("Notificación generada: autor={}, actor={}, archivo={} ({})",
-                owner, actor, resourceId, what);
+        log.info("Notificación generada: autor={}, actor={}, recurso={} {} ({})",
+                owner, actor, resourceType, resourceId, title);
     }
 
     @Override

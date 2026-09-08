@@ -70,6 +70,8 @@ public interface AdminService {
 
     BackupInfoResponse storeUploadedBackup(String originalName, java.io.InputStream zipStream);
 
+    com.officeplatform.dto.response.PathValidationResponse validateBackupPath(String path);
+
     BackupConfigResponse getBackupConfig();
 
     BackupConfigResponse updateBackupConfig(BackupConfigRequest request);

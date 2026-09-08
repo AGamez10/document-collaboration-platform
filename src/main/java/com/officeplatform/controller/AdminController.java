@@ -383,6 +383,25 @@ public class AdminController {
         return ResponseEntity.ok(response);
     }
 
+    /** Comprueba una ruta de destino antes de guardarla, para no descubrir el error en el
+     *  próximo respaldo automático. */
+    @PostMapping("/backups/config/validate-path")
+    public ResponseEntity<ApiResponse<com.officeplatform.dto.response.PathValidationResponse>> validateBackupPath(
+            @Valid @RequestBody com.officeplatform.dto.request.ValidatePathRequest request) {
+
+        com.officeplatform.dto.response.PathValidationResponse data =
+                adminService.validateBackupPath(request.getPath());
+
+        ApiResponse<com.officeplatform.dto.response.PathValidationResponse> response =
+                ApiResponse.<com.officeplatform.dto.response.PathValidationResponse>builder()
+                        .success(true)
+                        .message(data.getMessage())
+                        .data(data)
+                        .build();
+
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/backups/config")
     public ResponseEntity<ApiResponse<BackupConfigResponse>> getBackupConfig() {
         BackupConfigResponse data = adminService.getBackupConfig();

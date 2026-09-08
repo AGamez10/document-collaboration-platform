@@ -43,11 +43,14 @@ public class FileController {
     private final FileService fileService;
     private final FolderService folderService;
     private final ShareService shareService;
+    private final com.officeplatform.service.notification.NotificationService notificationService;
 
-    public FileController(FileService fileService, FolderService folderService, ShareService shareService) {
+    public FileController(FileService fileService, FolderService folderService, ShareService shareService,
+                          com.officeplatform.service.notification.NotificationService notificationService) {
         this.fileService = fileService;
         this.folderService = folderService;
         this.shareService = shareService;
+        this.notificationService = notificationService;
     }
 
     @GetMapping
@@ -332,6 +335,8 @@ public class FileController {
                 id, principal.getApiKeyId(), request.getOriginalFileName(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName));
 
+        notifyOwnerOfChange(fileEntity, principal, userId, userName, "renombró");
+
         ApiResponse<FileResponse> response = ApiResponse.<FileResponse>builder()
                 .success(true)
                 .message("Archivo renombrado correctamente")
@@ -367,6 +372,8 @@ public class FileController {
         FileEntity fileEntity = folderService.moveFile(
                 id, request.getFolderId(), principal.getApiKeyId(),
                 principal.resolveUserId(userId), principal.resolveUserName(userName), scope);
+
+        notifyOwnerOfChange(fileEntity, principal, userId, userName, "movió");
 
         ApiResponse<FileResponse> response = ApiResponse.<FileResponse>builder()
                 .success(true)
@@ -477,6 +484,31 @@ public class FileController {
         if (!allowed) {
             throw new com.officeplatform.exception.ShareAccessDeniedException(
                     "No tienes permisos para " + action + " este archivo, no eres el propietario.");
+        }
+    }
+
+    /**
+     * Avisa al autor cuando otra persona altera su documento.
+     *
+     * <p>Silencioso ante fallos: mover o renombrar debe completarse igual aunque la notificación
+     * no pueda registrarse. El servicio ya ignora el caso de actuar sobre lo propio.
+     */
+    private void notifyOwnerOfChange(FileEntity file, ApiKeyPrincipal principal,
+                                     String userId, String userName, String verb) {
+        try {
+            String actor = principal.resolveUserId(userId);
+            String actorName = principal.resolveUserName(userName);
+            String who = (actorName != null && !actorName.isBlank()) ? actorName : actor;
+            notificationService.notifyResourceAction(
+                    file.getCreatedByUserId() != null ? file.getCreatedByUserId() : file.getUserId(),
+                    actor,
+                    who,
+                    file.getId(),
+                    "FILE",
+                    "Documento modificado",
+                    who + " " + verb + " tu documento '" + file.getOriginalFileName() + "'");
+        } catch (RuntimeException ignored) {
+            // Información secundaria: no interrumpe la operación que la disparó.
         }
     }
 

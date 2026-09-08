@@ -22,6 +22,16 @@ public interface NotificationService {
     void notifyResourceOpened(String ownerUserId, String actorUserId, String actorName,
                               Long resourceId, String resourceType, String resourceName);
 
+    /**
+     * Records any action somebody performed on a resource belonging to another person.
+     *
+     * <p>Rate-limited per (recipient, actor, resource, title): opening a folder issues a listing
+     * on every navigation, and without a cooldown a single browsing session would bury the
+     * recipient in dozens of identical messages.
+     */
+    void notifyResourceAction(String ownerUserId, String actorUserId, String actorName,
+                              Long resourceId, String resourceType, String title, String message);
+
     /** @return true if the notification existed, belonged to this person and was marked read */
     boolean markAsRead(Long notificationId, String recipientUserId);
 

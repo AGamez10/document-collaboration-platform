@@ -62,6 +62,9 @@
     cfgBackupReplicationDir: document.getElementById('op-cfg-backup-replication-dir'),
     cfgBackupReplicationEnabled: document.getElementById('op-cfg-backup-replication-enabled'),
     cfgReplicationStatus: document.getElementById('op-cfg-replication-status'),
+    verifyBackupDir: document.getElementById('op-verify-backup-dir'),
+    verifyReplicationDir: document.getElementById('op-verify-replication-dir'),
+    backupDirStatus: document.getElementById('op-backup-dir-status'),
     uploadBackupBtn: document.getElementById('op-upload-backup-btn'),
     uploadBackupInput: document.getElementById('op-upload-backup-input'),
 
@@ -960,6 +963,49 @@
     } catch (err) {
       showToast('No se pudo restaurar el respaldo externo: ' + err.message, true);
     }
+  }
+
+  /**
+   * Comprueba una ruta contra el sistema de archivos del servidor antes de guardarla.
+   * Sin esto, un error de tipeo solo se descubre cuando un respaldo deja de generarse.
+   */
+  async function verifyPath(input, statusEl, btn) {
+    const path = input.value.trim();
+    if (!path) {
+      statusEl.textContent = 'Escribí una ruta para verificarla.';
+      statusEl.className = 'op-field__hint is-error';
+      return;
+    }
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Verificando...';
+    try {
+      const body = await api('/api/admin/backups/config/validate-path', {
+        method: 'POST',
+        body: JSON.stringify({ path: path }),
+      });
+      const d = body.data || {};
+      statusEl.textContent = d.message || (d.valid ? 'Ruta accesible.' : 'Ruta no accesible.');
+      statusEl.className = 'op-field__hint ' + (d.valid ? 'is-ok' : 'is-error');
+      if (d.valid && d.path) input.value = d.path;
+    } catch (err) {
+      statusEl.textContent = err.message;
+      statusEl.className = 'op-field__hint is-error';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  }
+
+  if (els.verifyBackupDir) {
+    els.verifyBackupDir.addEventListener('click', function () {
+      verifyPath(els.cfgBackupDir, els.backupDirStatus, els.verifyBackupDir);
+    });
+  }
+  if (els.verifyReplicationDir) {
+    els.verifyReplicationDir.addEventListener('click', function () {
+      verifyPath(els.cfgBackupReplicationDir, els.cfgReplicationStatus, els.verifyReplicationDir);
+    });
   }
 
   els.backupConfigBtn.addEventListener('click', function () {
