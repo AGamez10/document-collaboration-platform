@@ -16,10 +16,13 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -177,14 +180,47 @@ public class BackupServiceImpl implements BackupService {
         List<ApiKeyEntity> allApiKeys = apiKeyRepository.findAll();
         List<KnownUserEntity> allUsers = knownUserRepository.findAll();
 
+        // Las rutas se resuelven antes de escribir nada porque el manifest va primero en el ZIP y
+        // tiene que declarar dónde quedó cada binario.
+        Map<Long, FolderEntity> foldersById = new HashMap<>();
+        for (FolderEntity folder : allFolders) {
+            if (folder.getId() != null) {
+                foldersById.put(folder.getId(), folder);
+            }
+        }
+        Map<Long, ApiKeyEntity> apiKeysById = new HashMap<>();
+        for (ApiKeyEntity apiKey : allApiKeys) {
+            if (apiKey.getId() != null) {
+                apiKeysById.put(apiKey.getId(), apiKey);
+            }
+        }
+
+        Set<String> usedPaths = new HashSet<>();
+        Map<Long, String> pathByFileId = new HashMap<>();
+        List<Map<String, Object>> filesMetadata = new ArrayList<>(allFiles.size());
+        for (FileEntity file : allFiles) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> node = objectMapper.convertValue(file, Map.class);
+            if (file.getObjectName() != null && !file.getObjectName().isBlank()) {
+                String entryPath = buildHierarchicalPath(file, foldersById, apiKeysById, usedPaths);
+                node.put("zipEntryPath", entryPath);
+                if (file.getId() != null) {
+                    pathByFileId.put(file.getId(), entryPath);
+                }
+            }
+            filesMetadata.add(node);
+        }
+
         Map<String, Object> manifest = new HashMap<>();
         manifest.put("backupType", type);
         manifest.put("createdAt", now.toString());
+        // Marca de formato: el restaurador la usa para saber que puede confiar en zipEntryPath.
+        manifest.put("layoutVersion", 2);
         manifest.put("totalFiles", allFiles.size());
         manifest.put("totalFolders", allFolders.size());
         manifest.put("totalApiKeys", allApiKeys.size());
         manifest.put("totalKnownUsers", allUsers.size());
-        manifest.put("filesMetadata", allFiles);
+        manifest.put("filesMetadata", filesMetadata);
         manifest.put("foldersMetadata", allFolders);
         manifest.put("apiKeysMetadata", allApiKeys);
         manifest.put("knownUsersMetadata", allUsers);
@@ -200,13 +236,18 @@ public class BackupServiceImpl implements BackupService {
             zos.write(manifestBytes);
             zos.closeEntry();
 
-            // 2. Stream binaries from MinIO
+            // 2. Los binarios van en su ruta legible: quien abra el ZIP en el Explorador tiene que
+            // encontrar sus proyectos y carpetas, no 300 UUID sueltos. Es la copia de contingencia
+            // para trabajar sin la plataforma, así que el nombre real no es cosmético.
             for (FileEntity file : allFiles) {
                 if (file.getObjectName() == null || file.getObjectName().isBlank()) {
                     continue;
                 }
+                String entryPath = file.getId() == null ? null : pathByFileId.get(file.getId());
+                if (entryPath == null) {
+                    entryPath = "archivos/_sin_ubicacion/" + safeName(file.getObjectName());
+                }
                 try (InputStream stream = storageService.retrieve(file.getObjectName())) {
-                    String entryPath = "files/" + file.getObjectName();
                     ZipEntry fileEntry = new ZipEntry(entryPath);
                     zos.putNextEntry(fileEntry);
                     stream.transferTo(zos);
@@ -239,6 +280,111 @@ public class BackupServiceImpl implements BackupService {
                 .type(type != null ? type.toUpperCase() : "MANUAL")
                 .createdAt(now)
                 .build();
+    }
+
+    /** Profundidad máxima de carpetas que se recorre antes de asumir que la cadena está rota. */
+    private static final int MAX_FOLDER_DEPTH = 32;
+
+    /**
+     * Ruta legible donde vive el binario de un archivo dentro del ZIP.
+     *
+     * <p>Reconstruye {@code archivos/{proyecto}/{carpeta}/.../{nombre real}} caminando la cadena de
+     * padres. Un backup se abre en el Explorador de Windows justo cuando la plataforma no está
+     * disponible: si ahí aparecen 300 UUID planos, el paquete es técnicamente correcto e
+     * inservible para la persona que necesita su planilla.
+     *
+     * @param usedPaths rutas ya ocupadas; dos archivos con el mismo nombre en la misma carpeta
+     *                  colisionarían y el segundo sobrescribiría la entrada del primero
+     */
+    private String buildHierarchicalPath(FileEntity file,
+                                         Map<Long, FolderEntity> foldersMap,
+                                         Map<Long, ApiKeyEntity> apiKeysMap,
+                                         Set<String> usedPaths) {
+        StringBuilder path = new StringBuilder("archivos/");
+
+        ApiKeyEntity project = file.getApiKeyId() == null ? null : apiKeysMap.get(file.getApiKeyId());
+        String projectName = project == null ? null : project.getName();
+        if (projectName == null || projectName.isBlank()) {
+            projectName = file.getApiKeyId() == null ? "sin-proyecto" : "proyecto-" + file.getApiKeyId();
+        }
+        path.append(safeName(projectName)).append('/');
+
+        for (String segment : folderChain(file.getFolderId(), foldersMap)) {
+            path.append(segment).append('/');
+        }
+
+        String name = file.getOriginalFileName();
+        if (name == null || name.isBlank()) {
+            name = file.getObjectName();
+        }
+        path.append(safeName(name));
+
+        return deduplicate(path.toString(), usedPaths);
+    }
+
+    /** Segmentos de carpeta desde la raíz hasta la que contiene el archivo, ya saneados. */
+    private List<String> folderChain(Long folderId, Map<Long, FolderEntity> foldersMap) {
+        List<String> chain = new ArrayList<>();
+        Set<Long> seen = new HashSet<>();
+        Long current = folderId;
+        // Se sube hasta la raíz y después se invierte. El guard de ciclos no es paranoia: una
+        // cadena de padres corrupta colgaría la generación del backup entero.
+        while (current != null && seen.add(current) && chain.size() < MAX_FOLDER_DEPTH) {
+            FolderEntity folder = foldersMap.get(current);
+            if (folder == null) {
+                break;
+            }
+            chain.add(safeName(folder.getName()));
+            current = folder.getParentId();
+        }
+        Collections.reverse(chain);
+        return chain;
+    }
+
+    /**
+     * Convierte un nombre en un segmento de ruta que Windows y el ZIP aceptan.
+     *
+     * <p>Windows rechaza {@code \ / : * ? " < > |} y no tolera un punto o un espacio al final del
+     * nombre: una carpeta llamada "Ventas." queda inaccesible al extraer.
+     */
+    static String safeName(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return "sin-nombre";
+        }
+        StringBuilder out = new StringBuilder(raw.length());
+        for (char c : raw.toCharArray()) {
+            out.append((c < 0x20 || "\\/:*?\"<>|".indexOf(c) >= 0) ? '_' : c);
+        }
+        String cleaned = out.toString().trim();
+        while (cleaned.endsWith(".") || cleaned.endsWith(" ")) {
+            cleaned = cleaned.substring(0, cleaned.length() - 1);
+        }
+        if (cleaned.isBlank()) {
+            return "sin-nombre";
+        }
+        return cleaned.length() > 120 ? cleaned.substring(0, 120) : cleaned;
+    }
+
+    /** Agrega un sufijo hasta encontrar una ruta libre, conservando la extensión. */
+    private static String deduplicate(String path, Set<String> usedPaths) {
+        if (usedPaths.add(path)) {
+            return path;
+        }
+        int dot = path.lastIndexOf('.');
+        int slash = path.lastIndexOf('/');
+        String base = (dot > slash) ? path.substring(0, dot) : path;
+        String extension = (dot > slash) ? path.substring(dot) : "";
+        for (int i = 2; i < 10000; i++) {
+            String candidate = base + " (" + i + ")" + extension;
+            if (usedPaths.add(candidate)) {
+                return candidate;
+            }
+        }
+        // Inalcanzable con menos de 10000 homónimos en la misma carpeta, pero no se devuelve una
+        // ruta repetida: sobrescribiría la entrada anterior y se perdería un archivo sin aviso.
+        String fallback = base + " (" + System.nanoTime() + ")" + extension;
+        usedPaths.add(fallback);
+        return fallback;
     }
 
     @Override

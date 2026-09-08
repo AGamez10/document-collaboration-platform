@@ -129,7 +129,11 @@ public class BackupRestoreService {
      */
     public BackupRestoreResponse restore(InputStream zipStream, String fileName) {
         JsonNode manifest = null;
-        Map<String, byte[]> binaries = new LinkedHashMap<>();
+        // Se indexan TODAS las entradas por su ruta completa. Los paquetes nuevos guardan los
+        // binarios bajo su jerarquía legible ("archivos/Proyecto/Carpeta/informe.docx") y declaran
+        // esa ruta en el manifest; los antiguos usaban "files/{objectName}". Quedarse solo con el
+        // prefijo viejo dejaría un backup nuevo sin un solo binario que restaurar.
+        Map<String, byte[]> zipEntries = new LinkedHashMap<>();
 
         try (ZipInputStream zis = new ZipInputStream(zipStream)) {
             ZipEntry entry;
@@ -141,8 +145,8 @@ public class BackupRestoreService {
                 String name = entry.getName();
                 if (MANIFEST_ENTRY.equals(name)) {
                     manifest = objectMapper.readTree(readEntry(zis));
-                } else if (name.startsWith(FILES_PREFIX)) {
-                    binaries.put(name.substring(FILES_PREFIX.length()), readEntry(zis));
+                } else {
+                    zipEntries.put(name, readEntry(zis));
                 }
                 zis.closeEntry();
             }
@@ -158,7 +162,7 @@ public class BackupRestoreService {
 
         Tally tally = new Tally();
         restoreMetadata(manifest, tally);
-        restoreBinaries(binaries, tally);
+        restoreBinaries(manifest.path("filesMetadata"), zipEntries, tally);
 
         log.info("Restauración de '{}' completada: {} archivos, {} carpetas, {} binarios ({} omitidos)",
                 fileName, tally.filesCreated + tally.filesUpdated,
@@ -281,11 +285,17 @@ public class BackupRestoreService {
             }
             entity.setName(text(node, "name"));
             entity.setUpdatedAt(dateTime(node, "updatedAt", LocalDateTime.now()));
-            entity.setApiKeyId(mapped(apiKeyIds, number(node, "apiKeyId")));
+            entity.setApiKeyId(resolveApiKeyId(
+                    mapped(apiKeyIds, number(node, "apiKeyId")), entity.getApiKeyId(),
+                    number(node, "apiKeyId"), tally, "Carpeta '" + text(node, "name") + "'"));
             entity.setUserId(text(node, "userId"));
             entity.setCreatedByName(text(node, "createdByName"));
             entity.setCreatedByUserId(text(node, "createdByUserId"));
             entity.setUpdatedByName(text(node, "updatedByName"));
+            // Se limpia el padre y se recablea en el segundo pase. Sin esto, una carpeta que en el
+            // respaldo estaba en la raíz pero acá cuelga de otra conservaría el padre equivocado:
+            // la restauración dejaría de ser fiel justo en la jerarquía que vino a recuperar.
+            entity.setParentId(null);
 
             FolderEntity saved = folderRepository.save(entity);
             Long backupId = number(node, "id");
@@ -345,7 +355,9 @@ public class BackupRestoreService {
             entity.setUpdatedAt(dateTime(node, "updatedAt", LocalDateTime.now()));
             entity.setMimeType(text(node, "mimeType"));
             entity.setSize(number(node, "size"));
-            entity.setApiKeyId(mapped(apiKeyIds, number(node, "apiKeyId")));
+            entity.setApiKeyId(resolveApiKeyId(
+                    mapped(apiKeyIds, number(node, "apiKeyId")), entity.getApiKeyId(),
+                    number(node, "apiKeyId"), tally, "Archivo '" + text(node, "originalFileName") + "'"));
             entity.setUserId(text(node, "userId"));
             entity.setCreatedByName(text(node, "createdByName"));
             entity.setCreatedByUserId(text(node, "createdByUserId"));
@@ -378,23 +390,26 @@ public class BackupRestoreService {
      * a failure here must not roll back metadata that is otherwise correct. Each failure is
      * recorded as a warning and the restore continues with the remaining files.
      */
-    private void restoreBinaries(Map<String, byte[]> binaries, Tally tally) {
-        if (binaries.isEmpty()) {
+    private void restoreBinaries(JsonNode filesMetadata, Map<String, byte[]> zipEntries, Tally tally) {
+        if (zipEntries.isEmpty()) {
             return;
         }
-        // Resolved once: looking the mime type up per binary would re-read the whole table on
-        // every iteration, which on a real package means thousands of full scans.
-        Map<String, String> mimeByObjectName = new HashMap<>();
-        for (FileEntity file : fileRepository.findAll()) {
-            if (file.getObjectName() != null) {
-                mimeByObjectName.putIfAbsent(file.getObjectName(), file.getMimeType());
+        // El recorrido lo manda el manifest y no el ZIP: es el manifest el que sabe qué objectName
+        // le corresponde a cada ruta. En los paquetes nuevos la ruta es legible y no tiene relación
+        // con el nombre del objeto, así que deducirlo del ZIP ya no es posible.
+        for (JsonNode node : arrayOf(filesMetadata)) {
+            String objectName = text(node, "objectName");
+            if (objectName == null || objectName.isBlank()) {
+                continue;
             }
-        }
-
-        for (Map.Entry<String, byte[]> binary : binaries.entrySet()) {
-            String objectName = binary.getKey();
-            byte[] content = binary.getValue();
-            String mimeType = mimeByObjectName.getOrDefault(objectName, "application/octet-stream");
+            byte[] content = findBinary(node, objectName, zipEntries);
+            if (content == null) {
+                tally.binariesSkipped++;
+                tally.warnings.add("El paquete no traía el binario de '"
+                        + textOr(node, "originalFileName", objectName) + "'.");
+                continue;
+            }
+            String mimeType = textOr(node, "mimeType", "application/octet-stream");
             try (InputStream in = new ByteArrayInputStream(content)) {
                 storageService.store(objectName, in, content.length, mimeType);
                 tally.binariesRestored++;
@@ -404,6 +419,52 @@ public class BackupRestoreService {
                 log.warn("No se pudo restaurar el binario {}: {}", objectName, e.getMessage());
             }
         }
+    }
+
+    /**
+     * Encuentra el contenido de un archivo dentro del ZIP.
+     *
+     * <p>Primero por la ruta jerárquica que declara el manifest, y si no está, por el
+     * {@code files/{objectName}} de los paquetes antiguos. Ese respaldo no es opcional: los
+     * backups ya generados tienen que seguir restaurándose después de esta versión.
+     */
+    private static byte[] findBinary(JsonNode node, String objectName, Map<String, byte[]> zipEntries) {
+        String declared = text(node, "zipEntryPath");
+        if (declared != null && zipEntries.containsKey(declared)) {
+            return zipEntries.get(declared);
+        }
+        return zipEntries.get(FILES_PREFIX + objectName);
+    }
+
+    /**
+     * Decide con qué proyecto queda una fila cuyo api key no se pudo mapear.
+     *
+     * <p>{@code api_key_id} es NOT NULL en folders y en files. Escribir null ahí aborta la
+     * transacción entera y no se restaura nada: era el motivo real de que las carpetas no
+     * volvieran y todo terminara plano en la raíz. El orden de preferencia va de lo más fiel a lo
+     * menos: el mapeo del propio respaldo, el valor que la fila ya tenía, el id original si por
+     * casualidad existe acá, y recién al final cualquier proyecto con tal de no perder la fila.
+     */
+    private Long resolveApiKeyId(Long mappedId, Long currentValue, Long backupApiKeyId,
+                                 Tally tally, String what) {
+        if (mappedId != null) {
+            return mappedId;
+        }
+        if (currentValue != null) {
+            return currentValue;
+        }
+        if (backupApiKeyId != null && apiKeyRepository.existsById(backupApiKeyId)) {
+            return backupApiKeyId;
+        }
+        Long fallback = apiKeyRepository.findAll().stream()
+                .map(ApiKeyEntity::getId)
+                .filter(java.util.Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+        if (fallback != null) {
+            tally.warnings.add(what + ": su proyecto no estaba en el respaldo, quedó asignado a otro.");
+        }
+        return fallback;
     }
 
     // ── manifest helpers: tolerate a package written by an older version ──────────
