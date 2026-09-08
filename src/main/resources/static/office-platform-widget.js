@@ -279,6 +279,56 @@
       border-color: var(--op-accent);
       box-shadow: 0 0 0 3px color-mix(in srgb, var(--op-accent) 20%, transparent);
     }
+    .op-macros-help-btn {
+      width: 32px; height: 32px; flex: 0 0 auto;
+      border: 1px solid var(--op-border); border-radius: 50%;
+      background: transparent; color: var(--op-text-dim);
+      font-size: 15px; font-weight: 700; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s ease;
+    }
+    .op-macros-help-btn:hover {
+      background: var(--op-accent); border-color: var(--op-accent);
+      color: #fff; transform: scale(1.06);
+    }
+    .op-modal--macros { max-width: 780px; width: 94vw; }
+    .op-mh-tabs { display: flex; gap: 4px; margin-top: 12px; border-bottom: 1px solid var(--op-border); }
+    .op-mh-tab {
+      appearance: none; border: 0; background: transparent; cursor: pointer;
+      padding: 9px 14px; font-size: 13px; font-weight: 600;
+      color: var(--op-text-dim); border-bottom: 2px solid transparent;
+      margin-bottom: -1px; transition: all .15s ease;
+    }
+    .op-mh-tab:hover { color: var(--op-text); }
+    .op-mh-tab.op-active { color: var(--op-accent); border-bottom-color: var(--op-accent); }
+    .op-mh-panel { padding-top: 4px; }
+    .op-mh-intro { font-size: 13px; color: var(--op-text-dim); line-height: 1.55; margin: 0 0 12px; }
+    /* Alto acotado: el prompt es largo y sin esto el modal se sale de la pantalla. */
+    .op-mh-code {
+      background: var(--op-bg-soft); border: 1px solid var(--op-border);
+      border-radius: 8px; padding: 12px 14px; margin: 0 0 12px;
+      font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+      font-size: 11.5px; line-height: 1.55; color: var(--op-text);
+      max-height: 280px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+    }
+    .op-mh-copy { width: 100%; justify-content: center; }
+    .op-mh-warn { font-size: 12px; color: var(--op-text-dim); margin: 12px 0 0; line-height: 1.5; }
+    .op-mh-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .op-mh-table th {
+      text-align: left; padding: 8px 10px; font-size: 11px; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--op-text-dim); border-bottom: 1px solid var(--op-border);
+    }
+    .op-mh-table td { padding: 8px 10px; border-bottom: 1px solid var(--op-border); vertical-align: top; }
+    .op-mh-vba { color: var(--op-text-dim); font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace; }
+    .op-mh-js { color: var(--op-text); font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace; }
+    .op-mh-mini {
+      appearance: none; border: 1px solid var(--op-border); border-radius: 6px;
+      background: transparent; color: var(--op-text-dim);
+      font-size: 11px; padding: 4px 9px; cursor: pointer; white-space: nowrap;
+    }
+    .op-mh-mini:hover { background: var(--op-accent); border-color: var(--op-accent); color: #fff; }
+    .op-mh-mini:disabled { opacity: .6; cursor: default; }
+
     .op-search-clear {
       position: absolute;
       right: 6px;
@@ -1872,6 +1922,196 @@
     _modalEl = backdrop;
 
     return { backdrop: backdrop, box: box, hd: hd, body: body, ft: ft };
+  }
+
+
+  // ── Ayuda de macros ────────────────────────────────────────────────────────
+  // Los analistas que llegan desde Excel VBA necesitan la traducción en el momento
+  // de escribir, no en un documento aparte. Todo esto es aditivo: no toca la
+  // autenticación por token, la subida de archivos ni el visor.
+
+  const MACRO_PROMPT = [
+    'Sos experto en la API de macros de OnlyOffice Document Server (Api de hojas de cálculo).',
+    '',
+    'Convertí la macro de Excel VBA que te paso al final a JavaScript de OnlyOffice,',
+    'siguiendo estas reglas sin excepción:',
+    '',
+    '1. Envolvé todo el código en (function () { ... })();',
+    '2. Usá Api.GetActiveSheet() para obtener la hoja activa.',
+    '3. Celdas por letra: sheet.GetRange("A1"). Por número: sheet.GetRangeByNumber(fila, columna),',
+    '   recordando que empiezan en 0, no en 1.',
+    '4. Leer es .GetValue(), escribir es .SetValue(valor).',
+    '5. Colores: Api.CreateColorFromRGB(r, g, b). Relleno .SetFillColor(...), letra .SetFontColor(...).',
+    '6. Formato: .SetBold(true), .SetFontSize(n), .SetFontName("..."), .SetAlignHorizontal("center"),',
+    '   .SetNumberFormat("#,##0.00").',
+    '7. Bordes: .SetBorders("Bottom", "Thin", Api.CreateColorFromRGB(r, g, b)).',
+    '8. MsgBox se convierte en Api.ShowAlert(...).',
+    '9. Ancho de columna con .SetColumnWidth(n); no existe AutoFit.',
+    '10. Comentá cada bloque en castellano, explicando qué hace en términos de negocio.',
+    '11. No inventes funciones que no existan en la API de OnlyOffice. Si algo de VBA no tiene',
+    '    equivalente, decilo en un comentario y proponé la alternativa más cercana.',
+    '',
+    'Devolveme únicamente el código final listo para pegar, y debajo una lista breve de las',
+    'diferencias de comportamiento que debería revisar.',
+    '',
+    'Esta es mi macro de VBA:',
+    '',
+    '[PEGÁ ACÁ TU MACRO]',
+  ].join('\n');
+
+  const MACRO_EQUIV = [
+    ['Set ws = ActiveSheet', 'let sheet = Api.GetActiveSheet();'],
+    ['Range("A1").Value = "X"', 'sheet.GetRange("A1").SetValue("X");'],
+    ['x = Range("A1").Value', 'let x = sheet.GetRange("A1").GetValue();'],
+    ['Cells(f, c).Value', 'sheet.GetRangeByNumber(f - 1, c - 1).GetValue();'],
+    ['.Font.Bold = True', '.SetBold(true);'],
+    ['.Interior.Color = RGB(r,g,b)', '.SetFillColor(Api.CreateColorFromRGB(r, g, b));'],
+    ['.Font.Color = RGB(r,g,b)', '.SetFontColor(Api.CreateColorFromRGB(r, g, b));'],
+    ['.NumberFormat = "#,##0.00"', '.SetNumberFormat("#,##0.00");'],
+    ['For i = 2 To 100 ... Next', 'for (let i = 2; i <= 100; i++) { ... }'],
+    ['MsgBox "Listo"', 'Api.ShowAlert("Listo");'],
+  ];
+
+  /** Copia texto al portapapeles y confirma en el propio botón. */
+  function copyToClipboard(text, btn) {
+    const done = function () {
+      const original = btn.textContent;
+      btn.textContent = 'Copiado';
+      btn.disabled = true;
+      setTimeout(function () { btn.textContent = original; btn.disabled = false; }, 1600);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () { fallbackCopy(text, done); });
+    } else {
+      // Sin contexto seguro (http://) la Clipboard API no existe: hay camino alternativo.
+      fallbackCopy(text, done);
+    }
+  }
+
+  function fallbackCopy(text, done) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); done(); } catch (_) {}
+    document.body.removeChild(ta);
+  }
+
+  function showMacrosHelp() {
+    const shell = buildModalShell('Ayuda de macros');
+    shell.box.classList.add('op-modal--macros');
+
+    const tabs = document.createElement('div');
+    tabs.className = 'op-mh-tabs';
+    const tabIA = document.createElement('button');
+    tabIA.type = 'button';
+    tabIA.className = 'op-mh-tab op-active';
+    tabIA.textContent = 'Conversor con IA';
+    const tabEq = document.createElement('button');
+    tabEq.type = 'button';
+    tabEq.className = 'op-mh-tab';
+    tabEq.textContent = 'Equivalencias rápidas';
+    tabs.appendChild(tabIA);
+    tabs.appendChild(tabEq);
+    shell.hd.appendChild(tabs);
+
+    // Panel 1: el prompt para la IA
+    const panelIA = document.createElement('div');
+    panelIA.className = 'op-mh-panel';
+    const introIA = document.createElement('p');
+    introIA.className = 'op-mh-intro';
+    introIA.textContent = 'Copiá este texto, pegalo en ChatGPT o Claude, y debajo pegá tu macro de Excel. '
+      + 'Te devuelve el código listo para el editor de macros.';
+    panelIA.appendChild(introIA);
+
+    const pre = document.createElement('pre');
+    pre.className = 'op-mh-code';
+    pre.textContent = MACRO_PROMPT;
+    panelIA.appendChild(pre);
+
+    const copyPrompt = document.createElement('button');
+    copyPrompt.type = 'button';
+    copyPrompt.className = 'op-btn-primary op-mh-copy';
+    copyPrompt.textContent = 'Copiar prompt al portapapeles';
+    copyPrompt.onclick = function () { copyToClipboard(MACRO_PROMPT, copyPrompt); };
+    panelIA.appendChild(copyPrompt);
+
+    const warn = document.createElement('p');
+    warn.className = 'op-mh-warn';
+    warn.textContent = 'Probá siempre el resultado sobre una copia antes de usarlo en producción.';
+    panelIA.appendChild(warn);
+
+    // Panel 2: tabla de equivalencias
+    const panelEq = document.createElement('div');
+    panelEq.className = 'op-mh-panel';
+    panelEq.hidden = true;
+    const introEq = document.createElement('p');
+    introEq.className = 'op-mh-intro';
+    introEq.textContent = 'Lo mismo que ya hacías, escrito distinto. Copiá el equivalente con un clic.';
+    panelEq.appendChild(introEq);
+
+    const table = document.createElement('table');
+    table.className = 'op-mh-table';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    ['Excel VBA', 'OnlyOffice JavaScript', ''].forEach(function (h) {
+      const th = document.createElement('th');
+      th.textContent = h;
+      htr.appendChild(th);
+    });
+    thead.appendChild(htr);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    MACRO_EQUIV.forEach(function (pair) {
+      const tr = document.createElement('tr');
+      const tdV = document.createElement('td');
+      tdV.className = 'op-mh-vba';
+      tdV.textContent = pair[0];
+      const tdJ = document.createElement('td');
+      tdJ.className = 'op-mh-js';
+      tdJ.textContent = pair[1];
+      const tdB = document.createElement('td');
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'op-mh-mini';
+      b.textContent = 'Copiar';
+      b.onclick = function () { copyToClipboard(pair[1], b); };
+      tdB.appendChild(b);
+      tr.appendChild(tdV);
+      tr.appendChild(tdJ);
+      tr.appendChild(tdB);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    panelEq.appendChild(table);
+
+    const hint = document.createElement('p');
+    hint.className = 'op-mh-warn';
+    hint.textContent = 'GetRangeByNumber cuenta desde 0: la celda A1 es (0, 0). '
+      + 'Es el error más común al convertir una macro.';
+    panelEq.appendChild(hint);
+
+    shell.body.appendChild(panelIA);
+    shell.body.appendChild(panelEq);
+
+    function activate(isIA) {
+      tabIA.classList.toggle('op-active', isIA);
+      tabEq.classList.toggle('op-active', !isIA);
+      panelIA.hidden = !isIA;
+      panelEq.hidden = isIA;
+    }
+    tabIA.onclick = function () { activate(true); };
+    tabEq.onclick = function () { activate(false); };
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'op-btn-secondary';
+    close.textContent = 'Cerrar';
+    close.onclick = closeModal;
+    shell.ft.appendChild(close);
   }
 
   function showModal(opts) {
@@ -3855,6 +4095,7 @@
             '<button type="button" class="op-view-btn op-active" data-mode="grid" aria-label="Vista de cuadrícula">' + ICONS.grid + '</button>' +
             '<button type="button" class="op-view-btn" data-mode="list" aria-label="Vista de lista">' + ICONS.list + '</button>' +
           '</div>' +
+          '<button type="button" class="op-macros-help-btn" aria-label="Ayuda de macros" title="Ayuda de macros: convertir desde Excel VBA">?</button>' +
           '<button type="button" class="op-refresh-btn" aria-label="Actualizar" title="Actualizar">' + ICONS.refresh + '</button>' +
           '<button type="button" class="op-theme-toggle" aria-label="Cambiar tema claro/oscuro" title="Cambiar tema">' + ICONS.moon + '</button>' +
         '</header>' +
@@ -4026,6 +4267,10 @@
     _viewButtons = _container.querySelectorAll('.op-view-btn');
     _themeToggleBtn = _container.querySelector('.op-theme-toggle');
     _refreshBtn = _container.querySelector('.op-refresh-btn');
+    // Ayuda de macros: opcional a propósito. Si el botón no está en el DOM (una
+    // integración con la barra recortada), el widget sigue funcionando igual.
+    const macrosHelpBtn = _container.querySelector('.op-macros-help-btn');
+    if (macrosHelpBtn) macrosHelpBtn.onclick = showMacrosHelp;
     _newBtn = _container.querySelector('.op-new-btn');
     _newFolderBtn = _container.querySelector('.op-new-folder-btn');
     _breadcrumbBar = _container.querySelector('.op-breadcrumb');

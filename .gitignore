@@ -72,6 +72,12 @@ replay_pid*
 Thumbs.db
 desktop.ini
 
+### OnlyOffice plugins (third-party, fetched by script) ###
+# 28 MB of vendor code that does not belong in the repository. docker-compose.yml
+# mounts these directories, so run scripts/install-onlyoffice-plugins.(sh|ps1) once
+# after cloning — without them the Extensiones tab is empty and Macros is missing.
+onlyoffice-plugins/
+
 ### AI / internal working notes (not part of the deliverable) ###
 .claude/
 .atl/
