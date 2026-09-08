@@ -280,23 +280,8 @@ public class FileController {
         return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
 
-    /**
-     * Descarga pública por UUID, con un segmento final opcional para el nombre del archivo.
-     *
-     * <p>Ese segundo segmento es decorativo y no participa de la búsqueda: el UUID sigue siendo lo
-     * único que identifica el archivo. Existe porque Excel de escritorio decide cómo interpretar lo
-     * que descarga mirando la extensión del último tramo de la URL, y una ruta terminada en el UUID
-     * le llega sin extensión. Aceptar {@code /download/{uuid}/plan.xlsm} deja la URL terminada en
-     * {@code .xlsm} sin abrir ninguna vía nueva de acceso, ya que el nombre no se usa para resolver
-     * nada. La forma de un solo segmento se mantiene porque es la que Document Server ya usa.
-     *
-     * @param uuid identificador del archivo, el único dato con el que se resuelve la descarga
-     * @param fileName nombre decorativo para que la URL termine en la extensión real; se ignora
-     */
-    @GetMapping({"/download/{uuid}", "/download/{uuid}/{fileName}"})
-    public ResponseEntity<InputStreamResource> downloadByUuid(
-            @PathVariable String uuid,
-            @PathVariable(required = false) String fileName) {
+    @GetMapping("/download/{uuid}")
+    public ResponseEntity<InputStreamResource> downloadByUuid(@PathVariable String uuid) {
         FileEntity fileEntity = fileService.getFileByUuid(uuid);
         InputStream inputStream = fileService.downloadByUuid(uuid);
         // El tipo se deriva de la extensión original: un .xlsm servido con el MIME genérico de
