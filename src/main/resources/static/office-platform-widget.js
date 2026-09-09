@@ -438,6 +438,13 @@
       background: var(--op-accent); border-color: var(--op-accent);
       color: #fff; transform: scale(1.06);
     }
+    .op-share-reshare {
+      display: flex; align-items: center; gap: 8px;
+      margin: 10px 0 4px; cursor: pointer;
+      font-size: 12.5px; color: var(--op-text-dim);
+    }
+    .op-share-reshare input { cursor: pointer; margin: 0; }
+    .op-share-reshare:hover { color: var(--op-text); }
     .op-modal--macros { max-width: 780px; width: 94vw; }
     .op-mh-tabs { display: flex; gap: 4px; margin-top: 12px; border-bottom: 1px solid var(--op-border); }
     .op-mh-tab {
@@ -3290,6 +3297,20 @@
     const userLevel = buildLevelSelect();
     userPanel.appendChild(userLevel);
 
+    // Re-compartir es una facultad aparte del nivel de acceso: EDIT dice qué puede hacerle al
+    // documento, esto dice si puede dárselo a alguien más. Va desmarcado porque delegar el
+    // reparto de acceso tiene que ser una decisión explícita de quien comparte, no un descuido.
+    const reshareWrap = document.createElement('label');
+    reshareWrap.className = 'op-share-reshare';
+    const reshareBox = document.createElement('input');
+    reshareBox.type = 'checkbox';
+    const reshareText = document.createElement('span');
+    reshareText.textContent = 'Permitir que esta persona lo comparta con más gente';
+    reshareWrap.appendChild(reshareBox);
+    reshareWrap.appendChild(reshareText);
+    reshareWrap.title = 'Sin esto, quien lo reciba puede usar el documento pero no repartir el acceso.';
+    userPanel.appendChild(reshareWrap);
+
     const userNotes = buildNotesField();
     userPanel.appendChild(userNotes.wrap);
 
@@ -3307,10 +3328,13 @@
         targetType: 'USER',
         targetUserId: selectedUser.userId,
         permissionLevel: userLevel.value,
+        canShare: reshareBox.checked,
         notes: userNotes.value(),
       }).then(function () {
-        toast('Compartido con ' + (selectedUser.displayName || selectedUser.userId), 'success');
+        toast('Compartido con ' + (selectedUser.displayName || selectedUser.userId)
+              + (reshareBox.checked ? ', con permiso para re-compartir' : ''), 'success');
         setSelectedUser(null);
+        reshareBox.checked = false;
         userNotes.clear();
         reloadPerms();
       }).catch(function (err) {

@@ -15,6 +15,16 @@ public interface ShareService {
     /** Shares a resource with a user or project. Upserts if a grant to the same target already exists. */
     SharePermissionResponse share(ShareRequest request, ApiKeyPrincipal principal);
 
+    /**
+     * Igual, pero juzgando sobre la identidad que el request realmente trae.
+     *
+     * <p>Un llamador autenticado con X-Api-Key no lleva cedula en el principal y la manda como
+     * parametro. Resolver la identidad solo desde el principal hacia que toda esa via pareciera
+     * anonima, y el propio autor de un archivo no podia compartirlo.
+     */
+    SharePermissionResponse share(ShareRequest request, ApiKeyPrincipal principal,
+                                  String requestUserId, String requestUserName);
+
     /** Lists the permissions attached to a resource (creator/admin only). */
     List<SharePermissionResponse> listResourcePermissions(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal);
 
@@ -48,8 +58,14 @@ public interface ShareService {
     /** Lo que le compartieron a esta persona y ella mando a su papelera. */
     List<SharedResourceResponse> trashedSharedWithMe(ApiKeyPrincipal principal);
 
+    /** Igual, con la identidad que trae el request para el flujo X-Api-Key. */
+    List<SharedResourceResponse> trashedSharedWithMe(ApiKeyPrincipal principal, String requestUserId);
+
     /** Resources shared directly with the calling user. */
     List<SharedResourceResponse> sharedWithMe(ApiKeyPrincipal principal);
+
+    /** Igual, con la identidad que trae el request para el flujo X-Api-Key. */
+    List<SharedResourceResponse> sharedWithMe(ApiKeyPrincipal principal, String requestUserId);
 
     /** Resources shared with the calling user's project. */
     List<SharedResourceResponse> sharedWithProject(ApiKeyPrincipal principal);

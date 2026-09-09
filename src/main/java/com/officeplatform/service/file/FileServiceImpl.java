@@ -430,10 +430,17 @@ public class FileServiceImpl implements FileService {
     }
 
     /**
-     * Same lookup, restricted to what the caller may legitimately reach: a file in the caller's
-     * project, or a private file the caller owns under another project (decentralized
-     * "Mis archivos"). Used by the delete/restore/purge gate so a missing file answers 404 while a
-     * file belonging to somebody else is left for the ownership check to reject with 403.
+     * Same lookup, restricted to what the caller may legitimately reach.
+     *
+     * <p>Resuelve tres caminos, y los tres hacen falta: un archivo del proyecto del llamador, uno
+     * privado suyo bajo otro proyecto ("Mis archivos" es descentralizado), y uno que alguien le
+     * compartió. Este último faltaba, y era el motivo de que quitar de "Compartidos conmigo"
+     * respondiera 404: el archivo existía y la persona tenía acceso, pero esta consulta no
+     * contemplaba las concesiones y fallaba antes de que el controlador pudiera desvincular.
+     *
+     * <p>Resolver no es autorizar. Esto solo decide si el recurso es alcanzable para responder 404
+     * o no; quién puede destruirlo lo sigue decidiendo {@code isOwnerOrAdmin} en el controlador,
+     * que es lo que separa borrar de verdad de renunciar al acceso propio.
      */
     @Override
     public FileEntity getFileIncludingTrashed(Long fileId, Long apiKeyId, String userId) {
@@ -445,10 +452,22 @@ public class FileServiceImpl implements FileService {
             throw new FileNotFoundException(fileId);
         }
         String owner = userId.trim();
-        return fileRepository.findById(fileId)
-                .filter(file -> file.getUserId() != null
-                        && file.getUserId().trim().equalsIgnoreCase(owner))
-                .orElseThrow(() -> new FileNotFoundException(fileId));
+        FileEntity file = fileRepository.findById(fileId).orElseThrow(() -> new FileNotFoundException(fileId));
+
+        boolean ownPrivateFile = file.getUserId() != null
+                && file.getUserId().trim().equalsIgnoreCase(owner);
+        if (ownPrivateFile || hasGrantOver(SharePermissionEntity.ResourceType.FILE, fileId, owner)) {
+            return file;
+        }
+        throw new FileNotFoundException(fileId);
+    }
+
+    /** Si a esta persona le concedieron acceso al recurso, aunque lo tenga en su papelera. */
+    private boolean hasGrantOver(SharePermissionEntity.ResourceType resourceType, Long resourceId, String userId) {
+        return !sharePermissionRepository
+                .findAllByResourceTypeAndResourceIdAndTargetTypeAndTargetUserId(
+                        resourceType, resourceId, SharePermissionEntity.TargetType.USER, userId)
+                .isEmpty();
     }
 
     @Override

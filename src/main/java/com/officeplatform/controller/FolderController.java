@@ -210,14 +210,28 @@ public class FolderController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        assertFolderOwnerOrAdmin(id, principal, userId, userName, "eliminar");
+        // Simétrico a los archivos: el autor manda la carpeta a la papelera del proyecto, el
+        // destinatario solo la saca de SU vista. Exigir propiedad acá devolvía 403 a quien
+        // simplemente quería dejar de ver algo que le compartieron.
+        boolean owner = shareService.isOwnerOrAdmin(
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, id, principal,
+                userId, userName);
 
-        folderService.deleteFolder(id, principal.getApiKeyId(),
-                principal.resolveUserId(userId), principal.resolveUserName(userName));
+        String message;
+        if (owner) {
+            folderService.deleteFolder(id, principal.getApiKeyId(),
+                    principal.resolveUserId(userId), principal.resolveUserName(userName));
+            message = "Carpeta movida a la papelera";
+        } else {
+            shareService.discardForUser(
+                    com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, id,
+                    principal.resolveUserId(userId));
+            message = "Carpeta movida a tu papelera";
+        }
 
         ApiResponse<Void> response = ApiResponse.<Void>builder()
                 .success(true)
-                .message("Carpeta movida a la papelera")
+                .message(message)
                 .build();
 
         return ResponseEntity.ok(response);

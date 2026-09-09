@@ -62,8 +62,16 @@ public class ShareServiceImpl implements ShareService {
     @Override
     @Transactional
     public SharePermissionResponse share(ShareRequest request, ApiKeyPrincipal principal) {
+        return share(request, principal, null, null);
+    }
+
+    @Override
+    @Transactional
+    public SharePermissionResponse share(ShareRequest request, ApiKeyPrincipal principal,
+                                         String requestUserId, String requestUserName) {
         Long sourceApiKeyId = principal.getApiKeyId();
-        assertCanManage(request.getResourceType(), request.getResourceId(), principal);
+        assertCanManage(request.getResourceType(), request.getResourceId(), principal,
+                requestUserId, requestUserName);
 
         String targetUserId = null;
         Long targetApiKeyId = null;
@@ -109,8 +117,8 @@ public class ShareServiceImpl implements ShareService {
                     .targetUserId(targetUserId)
                     .targetApiKeyId(targetApiKeyId)
                     .permissionLevel(request.getPermissionLevel())
-                    .sharedByUserId(principal.resolveUserId(null))
-                    .sharedByName(principal.resolveUserName(null))
+                    .sharedByUserId(principal.resolveUserId(requestUserId))
+                    .sharedByName(principal.resolveUserName(requestUserName))
                     .notes(request.getNotes())
                     .canShare(Boolean.TRUE.equals(request.getCanShare()))
                     .build();
@@ -254,7 +262,14 @@ public class ShareServiceImpl implements ShareService {
 
     @Override
     public List<SharedResourceResponse> sharedWithMe(ApiKeyPrincipal principal) {
-        String userId = principal.resolveUserId(null);
+        return sharedWithMe(principal, null);
+    }
+
+    @Override
+    public List<SharedResourceResponse> sharedWithMe(ApiKeyPrincipal principal, String requestUserId) {
+        // La identidad viaja como parametro en el flujo X-Api-Key: resolverla solo desde el
+        // principal devolvia una lista vacia a quien si tenia recursos compartidos.
+        String userId = principal.resolveUserId(requestUserId);
         if (userId == null || userId.isBlank()) {
             return List.of();
         }
@@ -266,7 +281,12 @@ public class ShareServiceImpl implements ShareService {
 
     @Override
     public List<SharedResourceResponse> trashedSharedWithMe(ApiKeyPrincipal principal) {
-        String userId = principal.resolveUserId(null);
+        return trashedSharedWithMe(principal, null);
+    }
+
+    @Override
+    public List<SharedResourceResponse> trashedSharedWithMe(ApiKeyPrincipal principal, String requestUserId) {
+        String userId = principal.resolveUserId(requestUserId);
         if (userId == null || userId.isBlank()) {
             return List.of();
         }
@@ -536,10 +556,15 @@ public class ShareServiceImpl implements ShareService {
      * hacerle al documento, {@code canShare} dice si puede dárselo a alguien más.
      */
     private void assertCanManage(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {
-        if (isOwnerOrAdmin(resourceType, resourceId, principal)) {
+        assertCanManage(resourceType, resourceId, principal, null, null);
+    }
+
+    private void assertCanManage(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal,
+                                 String requestUserId, String requestUserName) {
+        if (isOwnerOrAdmin(resourceType, resourceId, principal, requestUserId, requestUserName)) {
             return;
         }
-        if (hasDelegatedShare(resourceType, resourceId, principal)) {
+        if (hasDelegatedShare(resourceType, resourceId, principal, requestUserId)) {
             return;
         }
         throw new ShareAccessDeniedException(
@@ -548,8 +573,9 @@ public class ShareServiceImpl implements ShareService {
     }
 
     /** Si a esta persona le compartieron el recurso permitiéndole volver a compartirlo. */
-    private boolean hasDelegatedShare(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {
-        String userId = normalizeIdentity(principal.resolveUserId(null));
+    private boolean hasDelegatedShare(ResourceType resourceType, Long resourceId,
+                                      ApiKeyPrincipal principal, String requestUserId) {
+        String userId = normalizeIdentity(principal.resolveUserId(requestUserId));
         if (userId == null || resourceId == null) {
             return false;
         }

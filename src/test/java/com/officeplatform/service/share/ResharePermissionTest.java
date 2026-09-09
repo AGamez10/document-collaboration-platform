@@ -92,9 +92,14 @@ class ResharePermissionTest {
                 knownUserRepository, apiKeyRepository, activityLogRecorder);
     }
 
-    /** Un llamador identificado por cédula, como llega desde el widget. */
+    /** Un llamador identificado por cédula, como llega desde el widget con token. */
     private ApiKeyPrincipal caller(String userId) {
         return new ApiKeyPrincipal(API_KEY, "Proyecto X", userId, "Nombre " + userId);
+    }
+
+    /** Un llamador del flujo X-Api-Key: el principal no lleva identidad, viaja por parámetro. */
+    private ApiKeyPrincipal anonymousPrincipal() {
+        return new ApiKeyPrincipal(API_KEY, "Proyecto X");
     }
 
     private void grantTo(String targetUserId, boolean canShare) {
@@ -186,6 +191,41 @@ class ResharePermissionTest {
         request.setCanShare(true);
 
         assertThat(service.share(request, caller("111")).getCanShare()).isTrue();
+    }
+
+    @Test
+    @DisplayName("the author sharing over X-Api-Key is judged on the identity the request carries")
+    void theAuthorMaySharePassingIdentityAsAParameter() {
+        // Un llamador con X-Api-Key no lleva cedula en el principal. Resolver la identidad solo
+        // desde ahi hacia que el propio autor de un archivo se viera anonimo y no pudiera
+        // compartirlo: exactamente la regresion que reporto el usuario en el navegador.
+        assertThat(service.share(requestTo("222"), anonymousPrincipal(), "111", "Ana")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a delegated recipient over X-Api-Key may re-share too")
+    void aDelegatedRecipientMaySharePassingIdentityAsAParameter() {
+        grantTo("222", true);
+
+        assertThat(service.share(requestTo("333"), anonymousPrincipal(), "222", "Beto")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("a stranger passing their identity as a parameter is still refused")
+    void aStrangerPassingIdentityIsStillRefused() {
+        // El reenvio de identidad no puede volverse un pase libre: sigue exigiendo autoria,
+        // rol de administrador o delegacion explicita.
+        assertThatThrownBy(() -> service.share(requestTo("333"), anonymousPrincipal(), "999", "Ajeno"))
+                .isInstanceOf(ShareAccessDeniedException.class);
+    }
+
+    @Test
+    @DisplayName("the grant records who actually shared it, not an empty author")
+    void recordsTheRealAuthorOfTheGrant() {
+        // sharedByUserId se resolvia contra el principal vacio y quedaba null: la concesion no
+        // decia quien la habia otorgado.
+        assertThat(service.share(requestTo("222"), anonymousPrincipal(), "111", "Ana")
+                .getSharedByName()).isEqualTo("Ana");
     }
 
     @Test

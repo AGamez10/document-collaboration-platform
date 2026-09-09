@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import jakarta.validation.Valid;
@@ -36,9 +37,13 @@ public class ShareController {
     @PostMapping("/share")
     public ResponseEntity<ApiResponse<SharePermissionResponse>> share(
             @Valid @RequestBody ShareRequest request,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        SharePermissionResponse data = shareService.share(request, principal);
+        // La identidad viaja como parametro en el flujo X-Api-Key y hay que reenviarla: sin esto
+        // el propio autor del recurso se veia anonimo y no podia compartirlo.
+        SharePermissionResponse data = shareService.share(request, principal, userId, userName);
 
         ApiResponse<SharePermissionResponse> response = ApiResponse.<SharePermissionResponse>builder()
                 .success(true)
@@ -91,9 +96,10 @@ public class ShareController {
      */
     @GetMapping("/trashed-with-me")
     public ResponseEntity<ApiResponse<List<SharedResourceResponse>>> trashedWithMe(
+            @RequestParam(required = false) String userId,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        List<SharedResourceResponse> data = shareService.trashedSharedWithMe(principal);
+        List<SharedResourceResponse> data = shareService.trashedSharedWithMe(principal, userId);
 
         ApiResponse<List<SharedResourceResponse>> response = ApiResponse.<List<SharedResourceResponse>>builder()
                 .success(true)
@@ -106,9 +112,10 @@ public class ShareController {
 
     @GetMapping("/shared-with-me")
     public ResponseEntity<ApiResponse<List<SharedResourceResponse>>> sharedWithMe(
+            @RequestParam(required = false) String userId,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        List<SharedResourceResponse> data = shareService.sharedWithMe(principal);
+        List<SharedResourceResponse> data = shareService.sharedWithMe(principal, userId);
 
         ApiResponse<List<SharedResourceResponse>> response = ApiResponse.<List<SharedResourceResponse>>builder()
                 .success(true)
