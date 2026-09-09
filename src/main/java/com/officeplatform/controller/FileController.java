@@ -29,10 +29,12 @@ import com.officeplatform.dto.request.RenameFileRequest;
 import com.officeplatform.dto.request.UploadFileRequest;
 import com.officeplatform.dto.response.ApiResponse;
 import com.officeplatform.dto.response.FileResponse;
+import com.officeplatform.dto.response.FileVersionResponse;
 import com.officeplatform.dto.response.UploadResponse;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.security.model.ApiKeyPrincipal;
 import com.officeplatform.service.file.FileService;
+import com.officeplatform.service.version.FileVersionService;
 import com.officeplatform.service.folder.FolderService;
 import com.officeplatform.service.share.ShareService;
 import com.officeplatform.util.MimeUtils;
@@ -44,13 +46,16 @@ public class FileController {
     private final FileService fileService;
     private final FolderService folderService;
     private final ShareService shareService;
+    private final FileVersionService fileVersionService;
     private final com.officeplatform.service.notification.NotificationService notificationService;
 
     public FileController(FileService fileService, FolderService folderService, ShareService shareService,
+                          FileVersionService fileVersionService,
                           com.officeplatform.service.notification.NotificationService notificationService) {
         this.fileService = fileService;
         this.folderService = folderService;
         this.shareService = shareService;
+        this.fileVersionService = fileVersionService;
         this.notificationService = notificationService;
     }
 
@@ -460,6 +465,108 @@ public class FileController {
                 .build();
 
         return ResponseEntity.ok(response);
+    }
+
+    // ── Historial de versiones ──────────────────────────────────────────────
+    // Cada guardado desde el editor archiva el estado previo. Consultar y descargar exige lo
+    // mismo que descargar el archivo; restaurar exige lo mismo que editarlo, porque cambia su
+    // contenido vigente.
+
+    @GetMapping("/{id}/versions")
+    public ResponseEntity<ApiResponse<List<FileVersionResponse>>> versions(
+            @PathVariable Long id,
+            @RequestParam(required = false) String userId,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level =
+                shareService.getEffectivePermission(
+                        com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal);
+        if (level == null) {
+            throw new com.officeplatform.exception.ShareAccessDeniedException(
+                    "No tienes acceso al historial de este archivo.");
+        }
+
+        List<FileVersionResponse> data = fileVersionService.listVersions(id).stream()
+                .map(v -> FileVersionResponse.builder()
+                        .id(v.getId())
+                        .versionNumber(v.getVersionNumber())
+                        .size(v.getSize())
+                        .createdByUserId(v.getCreatedByUserId())
+                        .createdByName(v.getCreatedByName())
+                        .createdAt(v.getCreatedAt())
+                        .comment(v.getComment())
+                        .build())
+                .toList();
+
+        ApiResponse<List<FileVersionResponse>> response = ApiResponse.<List<FileVersionResponse>>builder()
+                .success(true)
+                .message("Historial de versiones listado correctamente")
+                .data(data)
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/versions/{versionNumber}/restore")
+    public ResponseEntity<ApiResponse<FileResponse>> restoreVersion(
+            @PathVariable Long id,
+            @PathVariable Integer versionNumber,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String userName,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level =
+                shareService.getEffectivePermission(
+                        com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal);
+        if (level != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
+            throw new com.officeplatform.exception.ShareAccessDeniedException(
+                    "Se requieren permisos de edición para restaurar una versión de este archivo.");
+        }
+
+        FileEntity fileEntity = fileVersionService.restoreVersion(id, versionNumber,
+                principal.getApiKeyId(), principal.resolveUserId(userId), principal.resolveUserName(userName));
+
+        ApiResponse<FileResponse> response = ApiResponse.<FileResponse>builder()
+                .success(true)
+                .message("Versión " + versionNumber + " restaurada. El estado anterior quedó en el historial.")
+                .data(toFileResponse(fileEntity))
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{id}/versions/{versionNumber}/download")
+    public ResponseEntity<InputStreamResource> downloadVersion(
+            @PathVariable Long id,
+            @PathVariable Integer versionNumber,
+            @RequestParam(required = false) String userId,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level =
+                shareService.getEffectivePermission(
+                        com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal);
+        if (level == null || level == com.officeplatform.entity.SharePermissionEntity.PermissionLevel.VIEW) {
+            throw new com.officeplatform.exception.ShareAccessDeniedException(
+                    "No tienes permisos de descarga sobre este archivo.");
+        }
+
+        FileEntity fileEntity = fileService.getFile(id, principal.getApiKeyId(),
+                principal.resolveUserId(userId));
+        InputStream stream = fileVersionService.downloadVersion(id, versionNumber);
+
+        // El nombre lleva la version para que dos descargas del mismo archivo no se pisen en la
+        // carpeta de descargas de quien las baja.
+        String base = fileEntity.getOriginalFileName();
+        int dot = base.lastIndexOf('.');
+        String named = (dot > 0)
+                ? base.substring(0, dot) + " (v" + versionNumber + ")" + base.substring(dot)
+                : base + " (v" + versionNumber + ")";
+
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + named + "\"")
+                .contentType(MediaType.parseMediaType(MimeUtils.contentTypeForFileName(
+                        fileEntity.getOriginalFileName(), fileEntity.getMimeType())))
+                .body(new InputStreamResource(stream));
     }
 
     @DeleteMapping("/{id}/purge")

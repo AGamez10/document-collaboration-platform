@@ -30,6 +30,7 @@ import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.activity.ActivityLogRecorder;
 import com.officeplatform.service.storage.StorageService;
+import com.officeplatform.service.version.FileVersionService;
 import com.officeplatform.util.DocxUtils;
 import com.officeplatform.util.FileUtils;
 import com.officeplatform.util.MimeUtils;
@@ -63,6 +64,7 @@ public class FileServiceImpl implements FileService {
     private final FolderRepository folderRepository;
     private final SharePermissionRepository sharePermissionRepository;
     private final StorageService storageService;
+    private final FileVersionService fileVersionService;
     private final ActivityLogRecorder activityLogRecorder;
     private final String bucket;
     private final List<String> allowedMimeTypes;
@@ -72,6 +74,7 @@ public class FileServiceImpl implements FileService {
             FolderRepository folderRepository,
             SharePermissionRepository sharePermissionRepository,
             StorageService storageService,
+            FileVersionService fileVersionService,
             ActivityLogRecorder activityLogRecorder,
             @Value("${office-platform.storage.minio.bucket}") String bucket,
             @Value("${office-platform.storage.allowed-mime-types}") String allowedMimeTypesRaw) {
@@ -79,6 +82,7 @@ public class FileServiceImpl implements FileService {
         this.folderRepository = folderRepository;
         this.sharePermissionRepository = sharePermissionRepository;
         this.storageService = storageService;
+        this.fileVersionService = fileVersionService;
         this.activityLogRecorder = activityLogRecorder;
         this.bucket = bucket;
         this.allowedMimeTypes = Arrays.asList(allowedMimeTypesRaw.split(","));
@@ -502,6 +506,10 @@ public class FileServiceImpl implements FileService {
         FileEntity fileEntity = fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNotNull(fileId, apiKeyId)
             .or(() -> fileRepository.findByIdAndDeletedAtIsNotNull(fileId))
             .orElseThrow(() -> new FileNotFoundException(fileId));
+
+        // El historial se va con el archivo: dejarlo huerfano acumularia binarios que nadie puede
+        // volver a alcanzar, porque la unica via de acceso era la fila que se esta borrando.
+        fileVersionService.purgeVersions(fileEntity.getId());
 
         storageService.delete(fileEntity.getObjectName());
         fileRepository.delete(fileEntity);

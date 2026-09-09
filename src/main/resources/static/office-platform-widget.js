@@ -1788,6 +1788,30 @@
     await apiFetch('/api/files/' + id + '/purge', { method: 'DELETE' });
   }
 
+  // ── Historial de versiones ──────────────────────────────────────────────
+  async function listVersions(id) {
+    const res = await apiFetch('/api/files/' + id + '/versions');
+    const j = await res.json();
+    return j.data || [];
+  }
+
+  async function restoreVersion(id, versionNumber) {
+    const res = await apiFetch('/api/files/' + id + '/versions/' + versionNumber + '/restore',
+      { method: 'POST' });
+    const j = await res.json();
+    return j.data;
+  }
+
+  async function downloadVersion(id, versionNumber, fileName) {
+    const res = await apiFetch('/api/files/' + id + '/versions/' + versionNumber + '/download');
+    const blob = await res.blob();
+    const dot = fileName.lastIndexOf('.');
+    const named = dot > 0
+      ? fileName.slice(0, dot) + ' (v' + versionNumber + ')' + fileName.slice(dot)
+      : fileName + ' (v' + versionNumber + ')';
+    triggerBlobDownload(blob, named);
+  }
+
   // ── Papelera de carpetas y de compartidos ────────────────────────────────
   // Son tres orígenes distintos porque significan cosas distintas: un archivo que su autor
   // eliminó, una carpeta con su subárbol, y un vínculo que el destinatario sacó de su vista sin
@@ -2849,6 +2873,106 @@
     document.body.removeChild(ta);
   }
 
+  /**
+   * Historial de versiones de un archivo.
+   *
+   * <p>Cada fila es un estado anterior completo, no un diff. Restaurar archiva antes el estado
+   * vigente, así que la operación nunca destruye: eso se dice en el modal, porque el miedo a
+   * "perder lo que tengo ahora" es lo que hace que nadie use un historial.
+   */
+  function showVersionHistory(file) {
+    const shell = buildModalShell('Historial de versiones');
+    const intro = document.createElement('p');
+    intro.className = 'op-mh-intro';
+    intro.textContent = file.originalFileName;
+    shell.body.appendChild(intro);
+
+    const loading = document.createElement('div');
+    loading.className = 'op-mh-intro';
+    loading.textContent = 'Cargando historial…';
+    shell.body.appendChild(loading);
+
+    listVersions(file.id).then(function (versions) {
+      loading.remove();
+      if (!versions.length) {
+        const vacio = document.createElement('p');
+        vacio.className = 'op-mh-intro';
+        vacio.textContent = 'Todavía no hay versiones anteriores. Se genera una cada vez que '
+          + 'alguien guarda cambios desde el editor.';
+        shell.body.appendChild(vacio);
+        return;
+      }
+
+      const nota = document.createElement('p');
+      nota.className = 'op-mh-intro';
+      nota.textContent = 'Restaurar no borra nada: el estado actual queda guardado como una '
+        + 'versión más antes de reemplazarlo.';
+      shell.body.appendChild(nota);
+
+      const table = document.createElement('table');
+      table.className = 'op-mh-table';
+      table.innerHTML = '<thead><tr><th>Versión</th><th>Cuándo</th><th>Quién</th>'
+        + '<th>Tamaño</th><th></th></tr></thead>';
+      const tbody = document.createElement('tbody');
+
+      versions.forEach(function (v) {
+        const tr = document.createElement('tr');
+
+        const num = document.createElement('td');
+        num.textContent = 'v' + v.versionNumber;
+        tr.appendChild(num);
+
+        const when = document.createElement('td');
+        when.textContent = formatDate(v.createdAt);
+        tr.appendChild(when);
+
+        const who = document.createElement('td');
+        who.textContent = v.createdByName || v.createdByUserId || '—';
+        who.title = v.comment || '';
+        tr.appendChild(who);
+
+        const size = document.createElement('td');
+        size.textContent = v.size ? formatBytes(v.size) : '—';
+        tr.appendChild(size);
+
+        const actions = document.createElement('td');
+        const bajar = document.createElement('button');
+        bajar.type = 'button';
+        bajar.className = 'op-btn-secondary';
+        bajar.textContent = 'Descargar';
+        bajar.onclick = function () {
+          downloadVersion(file.id, v.versionNumber, file.originalFileName)
+            .catch(function (err) { toast('No se pudo descargar: ' + err.message, 'error'); });
+        };
+        actions.appendChild(bajar);
+
+        const volver = document.createElement('button');
+        volver.type = 'button';
+        volver.className = 'op-btn-primary';
+        volver.textContent = 'Restaurar';
+        volver.onclick = function () {
+          volver.disabled = true;
+          restoreVersion(file.id, v.versionNumber).then(function () {
+            toast('Versión v' + v.versionNumber + ' restaurada', 'success');
+            closeModal();
+            loadFiles();
+          }).catch(function (err) {
+            volver.disabled = false;
+            toast('No se pudo restaurar: ' + err.message, 'error');
+          });
+        };
+        actions.appendChild(volver);
+        tr.appendChild(actions);
+
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      shell.body.appendChild(table);
+    }).catch(function (err) {
+      loading.textContent = 'No se pudo cargar el historial: ' + err.message;
+    });
+  }
+
   function showMacrosHelp() {
     const shell = buildModalShell('Ayuda de macros');
     shell.box.classList.add('op-modal--macros');
@@ -3824,6 +3948,9 @@
         openInDesktopExcel(file);
       }));
     }
+    items.push(menuItem('Historial de versiones', ICONS.restore, false, function () {
+      showVersionHistory(file);
+    }));
     if (state.section === 'files' || state.section === 'shared') {
       items.push(menuItem('Compartir', ICONS.share, false, function () { openShareModal('FILE', file.id, file.originalFileName); }));
     }

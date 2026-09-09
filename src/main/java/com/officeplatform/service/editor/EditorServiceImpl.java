@@ -28,6 +28,7 @@ import com.officeplatform.security.model.ApiKeyPrincipal;
 import com.officeplatform.service.activity.ActivityLogRecorder;
 import com.officeplatform.service.file.FileService;
 import com.officeplatform.service.storage.StorageService;
+import com.officeplatform.service.version.FileVersionService;
 import com.officeplatform.util.DateUtils;
 import com.officeplatform.util.UrlUtils;
 
@@ -60,6 +61,7 @@ public class EditorServiceImpl implements EditorService {
     private final EditorSessionRepository editorSessionRepository;
     private final RestTemplate restTemplate;
     private final ShareService shareService;
+    private final FileVersionService fileVersionService;
     private final com.officeplatform.service.notification.NotificationService notificationService;
     private final com.officeplatform.repository.SharePermissionRepository sharePermissionRepository;
     private final com.officeplatform.repository.KnownUserRepository knownUserRepository;
@@ -77,6 +79,7 @@ public class EditorServiceImpl implements EditorService {
             EditorSessionRepository editorSessionRepository,
             RestTemplate restTemplate,
             ShareService shareService,
+            FileVersionService fileVersionService,
             com.officeplatform.service.notification.NotificationService notificationService,
             com.officeplatform.repository.SharePermissionRepository sharePermissionRepository,
             com.officeplatform.repository.KnownUserRepository knownUserRepository,
@@ -92,6 +95,7 @@ public class EditorServiceImpl implements EditorService {
         this.editorSessionRepository = editorSessionRepository;
         this.restTemplate = restTemplate;
         this.shareService = shareService;
+        this.fileVersionService = fileVersionService;
         this.notificationService = notificationService;
         this.sharePermissionRepository = sharePermissionRepository;
         this.knownUserRepository = knownUserRepository;
@@ -241,6 +245,14 @@ public class EditorServiceImpl implements EditorService {
             throw new OnlyOfficeException("No se pudo descargar el documento actualizado desde OnlyOffice");
         }
 
+        // El estado previo se archiva ANTES de pisarlo: una vez que store() sobrescribe el objeto,
+        // el contenido anterior deja de existir. archiveCurrent nunca propaga errores, porque
+        // perder una version es lamentable y perder este guardado es inaceptable.
+        List<String> callbackUsers = callback.getUsers();
+        String editorUserId = (callbackUsers != null && !callbackUsers.isEmpty()) ? callbackUsers.get(0) : null;
+        fileVersionService.archiveCurrent(fileEntity, editorUserId, updatedByName,
+                "Estado previo a un guardado desde el editor");
+
         storageService.store(
                 fileEntity.getObjectName(),
                 new ByteArrayInputStream(content),
@@ -254,10 +266,9 @@ public class EditorServiceImpl implements EditorService {
         }
         fileRepository.save(fileEntity);
 
-        List<String> users = callback.getUsers();
-        String userId = (users != null && !users.isEmpty()) ? users.get(0) : null;
+        String userId = editorUserId;
         activityLogRecorder.record(fileEntity.getApiKeyId(), userId, updatedByName, ActivityAction.EDITOR_SAVE,
-                fileEntity.getId(), fileEntity.getOriginalFileName(), "users: " + users, fileEntity.getFolderId());
+                fileEntity.getId(), fileEntity.getOriginalFileName(), "users: " + callbackUsers, fileEntity.getFolderId());
 
         // Guardar cambios en un documento ajeno es más relevante que abrirlo, así que también
         // se avisa. Secundario como siempre: nunca debe hacer fallar el guardado en sí.
