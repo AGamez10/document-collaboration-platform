@@ -546,6 +546,64 @@ class BackupRestoreServiceTest {
     }
 
     @Test
+    @DisplayName("a folder that was in the trash comes back in the trash, not in the active space")
+    void restoresTheFolderTrash() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        Map<String, Object> papelera = folderNode(22L, "uuid-papelera", "Eliminada", null, 3L);
+        papelera.put("deletedAt", "2026-03-01T10:00:00");
+        papelera.put("deletedByUserId", "111");
+        manifest.put("foldersMetadata", List.of(papelera));
+        manifest.put("filesMetadata", List.of());
+
+        service.restore(new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        FolderEntity restaurada = foldersByUuid.get("uuid-papelera");
+        // Devolverla al espacio activo resucitaria algo que alguien decidio eliminar.
+        assertThat(restaurada.getDeletedAt()).isEqualTo(LocalDateTime.of(2026, 3, 1, 10, 0));
+        assertThat(restaurada.getDeletedByUserId()).isEqualTo("111");
+    }
+
+    @Test
+    @DisplayName("the power to re-share survives the round trip instead of being downgraded")
+    void restoresTheReshareFlag() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        Map<String, Object> permiso = grantNode("FILE", 31L, 3L, "USER", "1004356866", null, "EDIT");
+        permiso.put("canShare", true);
+        manifest.put("sharePermissionsMetadata", List.of(permiso));
+
+        service.restore(new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        assertThat(savedGrants.get(0).canReshare()).isTrue();
+    }
+
+    @Test
+    @DisplayName("what a recipient had discarded stays discarded after a restore")
+    void restoresTheRecipientTrash() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        Map<String, Object> permiso = grantNode("FILE", 31L, 3L, "USER", "1004356866", null, "VIEW");
+        permiso.put("deletedAt", "2026-03-02T09:30:00");
+        manifest.put("sharePermissionsMetadata", List.of(permiso));
+
+        service.restore(new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        // Reaparecer en la vista de alguien que lo habia sacado seria deshacer su decision.
+        assertThat(savedGrants.get(0).getDeletedAt()).isEqualTo(LocalDateTime.of(2026, 3, 2, 9, 30));
+    }
+
+    @Test
+    @DisplayName("a legacy grant with no re-share flag is restored as not allowed")
+    void restoresALegacyGrantAsNotAllowed() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        // Paquete anterior a la columna: no trae canShare.
+        manifest.put("sharePermissionsMetadata", List.of(
+                grantNode("FILE", 31L, 3L, "USER", "1004356866", null, "EDIT")));
+
+        service.restore(new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        assertThat(savedGrants.get(0).canReshare()).isFalse();
+    }
+
+    @Test
     @DisplayName("a package with no manifest is rejected with an explanation")
     void rejectsAPackageWithoutManifest() throws Exception {
         ByteArrayOutputStream out = new ByteArrayOutputStream();

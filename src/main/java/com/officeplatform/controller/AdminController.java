@@ -167,13 +167,32 @@ public class AdminController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Devuelve un archivo a la papelera de su dueño. La restauración final la hace él.
+     *
+     * <p>El mensaje dice lo que realmente pasa: antes anunciaba "restaurado a su ubicación
+     * original" mientras empujaba el documento al espacio activo de alguien que no lo había pedido.
+     */
     @PostMapping("/files/{id}/restore")
     public ResponseEntity<ApiResponse<Void>> restoreFile(@PathVariable Long id) {
         adminService.restoreFile(id);
 
         ApiResponse<Void> response = ApiResponse.<Void>builder()
                 .success(true)
-                .message("Archivo restaurado correctamente a su ubicación original")
+                .message("Archivo devuelto a la papelera del usuario. Él decide la restauración final.")
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    /** Devuelve una carpeta a la papelera de su dueño. La restauración final la hace él. */
+    @PostMapping("/folders/{id}/restore")
+    public ResponseEntity<ApiResponse<Void>> restoreFolder(@PathVariable Long id) {
+        adminService.restoreFolder(id);
+
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+                .success(true)
+                .message("Carpeta devuelta a la papelera del usuario. Él decide la restauración final.")
                 .build();
 
         return ResponseEntity.ok(response);

@@ -330,6 +330,10 @@ public class BackupRestoreService {
             entity.setCreatedByName(text(node, "createdByName"));
             entity.setCreatedByUserId(text(node, "createdByUserId"));
             entity.setUpdatedByName(text(node, "updatedByName"));
+            // La papelera viaja con el respaldo: restaurar una copia y perder lo que estaba
+            // eliminado devolveria al espacio activo cosas que alguien decidio sacar de ahi.
+            entity.setDeletedAt(dateTime(node, "deletedAt", null));
+            entity.setDeletedByUserId(text(node, "deletedByUserId"));
             // Se limpia el padre y se recablea en el segundo pase. Sin esto, una carpeta que en el
             // respaldo estaba en la raíz pero acá cuelga de otra conservaría el padre equivocado:
             // la restauración dejaría de ser fiel justo en la jerarquía que vino a recuperar.
@@ -496,6 +500,10 @@ public class BackupRestoreService {
                 entity.setCreatedAt(dateTime(node, "createdAt", LocalDateTime.now()));
             }
             entity.setPermissionLevel(level);
+            // Sin esto una restauracion degradaba en silencio: quien tenia delegada la facultad de
+            // re-compartir la perdia, y lo que alguien habia descartado le reaparecia en la vista.
+            entity.setCanShare(bool(node, "canShare", Boolean.FALSE));
+            entity.setDeletedAt(dateTime(node, "deletedAt", null));
             entity.setSharedByUserId(text(node, "sharedByUserId"));
             entity.setSharedByName(text(node, "sharedByName"));
             entity.setNotes(text(node, "notes"));

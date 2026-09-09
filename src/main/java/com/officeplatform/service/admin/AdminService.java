@@ -38,7 +38,11 @@ public interface AdminService {
 
     List<AdminFileResponse> listFiles(Long apiKeyId, boolean trashed);
 
+    /** Devuelve un archivo a la papelera de su dueno; la restauracion final la hace el. */
     void restoreFile(Long fileId);
+
+    /** Devuelve una carpeta a la papelera de su dueno; la restauracion final la hace el. */
+    void restoreFolder(Long folderId);
 
     void purgeFile(Long fileId);
 

@@ -432,6 +432,38 @@ class BackupPackageLayoutTest {
     }
 
     @Test
+    @DisplayName("the folder trash travels in the package with its timestamps")
+    void carriesTheFolderTrash(@TempDir Path dir) throws Exception {
+        FolderEntity papelera = folder(20L, null, "Eliminada", 3L);
+        papelera.setDeletedAt(java.time.LocalDateTime.of(2026, 3, 1, 10, 0));
+        papelera.setDeletedByUserId("111");
+
+        BackupServiceImpl service = serviceOn(dir, List.of(), List.of(papelera), List.of(key(3L, "Proyecto X")));
+        JsonNode folders = manifestOf(dir, service.createBackup("MANUAL").getFileName()).get("foldersMetadata");
+
+        // Sin esto, restaurar una copia devolveria al espacio activo lo que alguien elimino.
+        assertThat(folders.get(0).get("deletedAt").asText()).startsWith("2026-03-01T10:00");
+        assertThat(folders.get(0).get("deletedByUserId").asText()).isEqualTo("111");
+    }
+
+    @Test
+    @DisplayName("the power to re-share and the recipient's own trash travel with the grant")
+    void carriesTheReshareFlagAndRecipientTrash(@TempDir Path dir) throws Exception {
+        SharePermissionEntity grant = grantToUser(SharePermissionEntity.ResourceType.FILE, 31L, 3L, "1004356866");
+        grant.setCanShare(true);
+        grant.setDeletedAt(java.time.LocalDateTime.of(2026, 3, 2, 9, 30));
+
+        BackupServiceImpl service = serviceOn(dir,
+                List.of(file(31L, null, "presupuesto.xlsx", 3L)),
+                List.of(), List.of(key(3L, "Proyecto X")), List.of(), List.of(grant));
+        JsonNode grants = manifestOf(dir, service.createBackup("MANUAL").getFileName())
+                .get("sharePermissionsMetadata");
+
+        assertThat(grants.get(0).get("canShare").asBoolean()).isTrue();
+        assertThat(grants.get(0).get("deletedAt").asText()).startsWith("2026-03-02T09:30");
+    }
+
+    @Test
     @DisplayName("the retention policy is not triggered by generating one package")
     void doesNotDeleteAnythingOnASingleBackup(@TempDir Path dir) throws Exception {
         BackupServiceImpl service = serviceOn(dir, List.of(), List.of(), List.of());

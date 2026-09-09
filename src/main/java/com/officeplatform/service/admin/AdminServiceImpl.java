@@ -48,6 +48,7 @@ import com.officeplatform.entity.FolderEntity;
 import com.officeplatform.entity.KnownUserEntity;
 import com.officeplatform.exception.ApiKeyNotFoundException;
 import com.officeplatform.exception.FileNotFoundException;
+import com.officeplatform.exception.FolderNotFoundException;
 import com.officeplatform.exception.StorageException;
 import com.officeplatform.onlyoffice.service.OnlyOfficeService;
 import com.officeplatform.repository.ActivityLogRepository;
@@ -315,18 +316,72 @@ public class AdminServiceImpl implements AdminService {
         return "Raíz / " + String.join(" / ", segments);
     }
 
+    /**
+     * Devuelve un archivo a la papelera de su dueño, no a su espacio activo.
+     *
+     * <p>Antes esto ponía {@code deletedAt} en null y el documento reaparecía de golpe entre los
+     * archivos vivos de alguien que no había pedido nada. La restauración final es una decisión del
+     * dueño: él sabe si todavía lo quiere y a dónde va. El administrador solo lo devuelve a la
+     * papelera, desde donde la persona lo restaura a su ubicación original cuando quiera.
+     *
+     * <p>Lo que sí resuelve es el caso que la persona no puede resolver sola. Un archivo en la
+     * papelera aparece ahí si su {@code createdByUserId}, su {@code userId} o su
+     * {@code createdByName} identifican a alguien; sin ninguno de los tres queda invisible para
+     * todos y solo se lo ve desde este panel. Cuando pasa, la traza lo dice en vez de simular que
+     * la operación tuvo efecto.
+     */
     @Override
     @Transactional
     public void restoreFile(Long fileId) {
         FileEntity fileEntity = fileRepository.findByIdAndDeletedAtIsNotNull(fileId)
                 .orElseThrow(() -> new FileNotFoundException(fileId));
 
-        fileEntity.setDeletedAt(null);
+        boolean reachable = hasText(fileEntity.getCreatedByUserId())
+                || hasText(fileEntity.getUserId())
+                || hasText(fileEntity.getCreatedByName());
+
         fileEntity.setUpdatedByName("Admin");
         FileEntity saved = fileRepository.save(fileEntity);
 
+        String details = reachable
+                ? "Devuelto a la papelera del usuario desde el panel de administración. "
+                        + "La restauración final la hace su dueño."
+                : "Devuelto a la papelera desde el panel de administración, pero el archivo no tiene "
+                        + "autor asignado: nadie lo verá en su papelera hasta que se le asigne uno.";
+
         activityLogRecorder.record(saved.getApiKeyId(), "admin", "Administrador", ActivityAction.RESTORE,
-                saved.getId(), saved.getOriginalFileName(), "Restaurado desde el panel de administración", saved.getFolderId());
+                saved.getId(), saved.getOriginalFileName(), details, saved.getFolderId());
+    }
+
+    /**
+     * Devuelve una carpeta a la papelera de su dueño, con el mismo criterio que un archivo.
+     *
+     * <p>La jerarquía ya está preservada por el borrado lógico, así que restaurar acá no necesita
+     * reconstruir nada: alcanza con dejarla donde la persona pueda recuperarla.
+     */
+    @Override
+    @Transactional
+    public void restoreFolder(Long folderId) {
+        FolderEntity folder = folderRepository.findById(folderId)
+                .orElseThrow(() -> new FolderNotFoundException(folderId));
+        if (folder.getDeletedAt() == null) {
+            throw new FolderNotFoundException(folderId);
+        }
+
+        boolean reachable = hasText(folder.getDeletedByUserId())
+                || hasText(folder.getCreatedByUserId())
+                || hasText(folder.getUserId());
+
+        activityLogRecorder.record(folder.getApiKeyId(), "admin", "Administrador", ActivityAction.RESTORE,
+                null, folder.getName(),
+                reachable
+                        ? "Carpeta devuelta a la papelera del usuario desde el panel de administración."
+                        : "Carpeta devuelta a la papelera, pero sin dueño asignado: nadie la verá en la suya.",
+                folder.getId());
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     @Override
