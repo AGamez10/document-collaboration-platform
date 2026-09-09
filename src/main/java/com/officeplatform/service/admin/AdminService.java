@@ -83,4 +83,7 @@ public interface AdminService {
 
     BackupConfigResponse updateBackupConfig(BackupConfigRequest request);
 
+    /** Prueba el destino de replicacion configurado escribiendo y borrando un archivo. */
+    com.officeplatform.dto.response.PathValidationResponse testRemoteBackup();
+
 }

@@ -647,6 +647,11 @@ public class AdminServiceImpl implements AdminService {
     }
 
     @Override
+    public com.officeplatform.dto.response.PathValidationResponse testRemoteBackup() {
+        return backupService.testRemoteReplication();
+    }
+
+    @Override
     public BackupConfigResponse updateBackupConfig(BackupConfigRequest request) {
         return backupService.updateConfig(request);
     }

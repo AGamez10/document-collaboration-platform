@@ -826,6 +826,50 @@ public class BackupServiceImpl implements BackupService {
      * actually write to, and the failure would only surface when a backup silently stopped
      * being produced.
      */
+    /**
+     * Prueba el destino remoto que la replicacion esta usando ahora mismo.
+     *
+     * <p>Acepta rutas UNC corporativas del tipo {@code \\NAS\backups}, con una advertencia que
+     * el codigo debe dar en vez de dejar que se descubra tarde: la aplicacion corre dentro de un
+     * contenedor Linux, y ahi una ruta UNC no significa nada. Para que funcione, el recurso de red
+     * tiene que estar montado en el host y ese punto de montaje bind-mounteado en el contenedor.
+     * Sin eso el destino simplemente no existe, y este endpoint lo dice con esas palabras en lugar
+     * de devolver un error de E/S que nadie sabe interpretar.
+     */
+    @Override
+    public com.officeplatform.dto.response.PathValidationResponse testRemoteReplication() {
+        if (!replicationEnabled) {
+            return com.officeplatform.dto.response.PathValidationResponse.builder()
+                    .valid(false).path(replicationDirectoryPath == null ? "" : replicationDirectoryPath)
+                    .message("La replicacion externa esta desactivada. Activala para probar el destino.")
+                    .build();
+        }
+        String configured = replicationDirectoryPath == null ? "" : replicationDirectoryPath.trim();
+        if (configured.isEmpty()) {
+            return com.officeplatform.dto.response.PathValidationResponse.builder()
+                    .valid(false).path("")
+                    .message("No hay un directorio de replicacion configurado.")
+                    .build();
+        }
+
+        boolean unc = configured.startsWith("\\\\") || configured.startsWith("//");
+        boolean windows = System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+
+        com.officeplatform.dto.response.PathValidationResponse result = validatePath(configured);
+        if (result.isValid()) {
+            return result;
+        }
+        if (unc && !windows) {
+            return com.officeplatform.dto.response.PathValidationResponse.builder()
+                    .valid(false).path(configured)
+                    .message("La ruta UNC '" + configured + "' no es alcanzable desde el contenedor. "
+                            + "Monta el recurso de red en el host y expone ese punto de montaje como "
+                            + "volumen en docker-compose; despues configura aca la ruta del volumen.")
+                    .build();
+        }
+        return result;
+    }
+
     @Override
     public com.officeplatform.dto.response.PathValidationResponse validatePath(String rawPath) {
         String candidate = (rawPath == null) ? "" : rawPath.trim();

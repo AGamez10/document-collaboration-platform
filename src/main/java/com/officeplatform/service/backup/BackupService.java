@@ -24,6 +24,14 @@ public interface BackupService {
 
     BackupConfigResponse updateConfig(BackupConfigRequest request);
 
+    /**
+     * Comprueba el destino remoto configurado escribiendo y borrando un archivo de prueba.
+     *
+     * <p>Distinto de validatePath: no evalua una ruta cualquiera sino la que la replicacion esta
+     * usando ahora, que es lo que responde la pregunta "mi respaldo externo esta funcionando".
+     */
+    com.officeplatform.dto.response.PathValidationResponse testRemoteReplication();
+
     /** Comprueba que una ruta de destino exista (o pueda crearse) y admita escritura real. */
     com.officeplatform.dto.response.PathValidationResponse validatePath(String path);
 

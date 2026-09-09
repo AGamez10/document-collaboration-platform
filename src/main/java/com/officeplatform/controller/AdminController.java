@@ -309,6 +309,27 @@ public class AdminController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Comprueba que el respaldo externo funcione de verdad.
+     *
+     * <p>Escribe y borra un archivo en el destino configurado. Que la ruta exista no alcanza: un
+     * recurso de red montado en solo lectura acepta la comprobacion de existencia y despues falla
+     * al copiar, y eso se descubriria el dia que hiciera falta el respaldo.
+     */
+    @PostMapping("/backups/test-remote")
+    public ResponseEntity<ApiResponse<com.officeplatform.dto.response.PathValidationResponse>> testRemoteBackup() {
+        com.officeplatform.dto.response.PathValidationResponse data = adminService.testRemoteBackup();
+
+        ApiResponse<com.officeplatform.dto.response.PathValidationResponse> response =
+                ApiResponse.<com.officeplatform.dto.response.PathValidationResponse>builder()
+                        .success(data.isValid())
+                        .message(data.getMessage())
+                        .data(data)
+                        .build();
+
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/backups/create")
     public ResponseEntity<ApiResponse<BackupInfoResponse>> createBackup(
             @RequestParam(defaultValue = "MANUAL") String type) {
