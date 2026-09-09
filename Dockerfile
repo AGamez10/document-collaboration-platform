@@ -5,10 +5,11 @@ WORKDIR /app
 
 COPY .mvn/ .mvn/
 COPY mvnw pom.xml ./
-RUN chmod +x mvnw && ./mvnw dependency:go-offline -B
+# -s .mvn/settings.xml aplica el mirror que evita los repositorios lentos de Flyway.
+RUN chmod +x mvnw && ./mvnw -s .mvn/settings.xml dependency:go-offline -B
 
 COPY src ./src
-RUN ./mvnw clean package -DskipTests -B
+RUN ./mvnw -s .mvn/settings.xml clean package -DskipTests -B
 
 # ---- Runtime stage ----
 FROM eclipse-temurin:21-jre-alpine AS runtime

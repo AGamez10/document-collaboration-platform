@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Redirige a Maven Central los repositorios que Flyway declara en su propio POM.
+
+  flyway-core y flyway-database-postgresql arrastran repositorios de terceros (repo.gradle.org,
+  un bucket S3 de Redshift, una copia en Google Storage y GitHub Packages) pensados para
+  dialectos que este proyecto no usa. Desde una cache vacia, que es exactamente la situacion
+  dentro del contenedor, Maven los consulta antes que Central y agota el timeout en cada uno.
+  Un build medido dio 1771 descargas, 396 de ellas contra esos cuatro destinos, y supero las
+  tres horas sin terminar. El mismo build en el host, con la cache caliente, tarda 19 segundos.
+
+  El mirror no cambia QUE se descarga, solo DE DONDE: los artefactos son los mismos y estan
+  todos en Central. Se nombran los cuatro repositorios de forma explicita en lugar de usar un
+  comodin, para no desviar en silencio ningun repositorio que el proyecto agregue mas adelante.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0
+                              https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <mirrors>
+    <mirror>
+      <id>central-en-lugar-de-mirrors-lentos</id>
+      <name>Maven Central en lugar de los repositorios que declara Flyway</name>
+      <url>https://repo1.maven.org/maven2</url>
+      <mirrorOf>repo.gradle.org,redshift,google-maven-central-copy,flyway-community-db-support,maven-central</mirrorOf>
+    </mirror>
+  </mirrors>
+</settings>
