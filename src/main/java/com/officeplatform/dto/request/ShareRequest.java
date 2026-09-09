@@ -35,6 +35,9 @@ public class ShareRequest {
     private PermissionLevel permissionLevel;
 
     /** Opcional: observaciones del que comparte. */
+    /** Si el destinatario podra volver a compartir el recurso. Ausente = no. */
+    private Boolean canShare;
+
     private String notes;
 
     /** Opcional: fecha de expiración del permiso. Null = sin vencimiento. */

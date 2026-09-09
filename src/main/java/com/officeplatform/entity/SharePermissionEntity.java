@@ -126,6 +126,20 @@ public class SharePermissionEntity {
     @Column(name = "expires_at")
     private LocalDateTime expiresAt;
 
+    /**
+     * Cuándo el destinatario descartó este recurso de su vista. Null significa visible.
+     *
+     * <p>La papelera vive acá, en el vínculo, y no en el archivo. {@code FileEntity.deletedAt} es
+     * global: si un destinatario "eliminaba" algo que le compartieron, desaparecía para todos,
+     * incluido el autor. Marcar la concesión hace que cada persona tenga su propia papelera sobre
+     * el mismo recurso, sin tocar el original ni la vista de los demás.
+     *
+     * <p>No revoca el acceso a propósito: quien lo tiene en su papelera todavía puede restaurarlo.
+     * El acceso se pierde recién al purgar, que borra la fila.
+     */
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     @PrePersist
     protected void onCreate() {
         if (createdAt == null) {

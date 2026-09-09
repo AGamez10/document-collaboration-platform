@@ -30,4 +30,18 @@ public interface SharePermissionRepository extends JpaRepository<SharePermission
     List<SharePermissionEntity> findAllByResourceTypeAndResourceIdAndTargetTypeAndTargetUserId(
             ResourceType resourceType, Long resourceId, TargetType targetType, String targetUserId);
 
+
+    // ── Papelera por persona ────────────────────────────────────────────────
+    // El listado de "Compartidos conmigo" solo muestra los vinculos vivos; la papelera del
+    // usuario muestra los descartados. Las consultas de arriba NO filtran a proposito: las usa
+    // el respaldo, que debe llevarse la papelera, y la restauracion.
+
+    /** Lo que le compartieron y no descarto: alimenta "Compartidos conmigo". */
+    List<SharePermissionEntity> findAllByTargetTypeAndTargetUserIdAndDeletedAtIsNull(
+            TargetType targetType, String targetUserId);
+
+    /** Lo que le compartieron y mando a su papelera. */
+    List<SharePermissionEntity> findAllByTargetTypeAndTargetUserIdAndDeletedAtIsNotNull(
+            TargetType targetType, String targetUserId);
+
 }

@@ -32,6 +32,22 @@ public interface ShareService {
      */
     int revokeAccessForUser(ResourceType resourceType, Long resourceId, String targetUserId);
 
+    /**
+     * Manda a la papelera personal del destinatario algo que le compartieron.
+     *
+     * <p>Marca el vinculo y no el archivo: FileEntity.deletedAt es global, asi que eliminar un
+     * compartido lo hacia desaparecer para todos, incluido su autor.
+     *
+     * @return cuantos vinculos se descartaron
+     */
+    int discardForUser(ResourceType resourceType, Long resourceId, String targetUserId);
+
+    /** Devuelve a "Compartidos conmigo" algo que el destinatario tenia en su papelera. */
+    int restoreForUser(ResourceType resourceType, Long resourceId, String targetUserId);
+
+    /** Lo que le compartieron a esta persona y ella mando a su papelera. */
+    List<SharedResourceResponse> trashedSharedWithMe(ApiKeyPrincipal principal);
+
     /** Resources shared directly with the calling user. */
     List<SharedResourceResponse> sharedWithMe(ApiKeyPrincipal principal);
 

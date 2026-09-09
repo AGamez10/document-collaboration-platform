@@ -396,14 +396,30 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        assertOwnerOrAdmin(id, principal, userId, userName, "eliminar");
+        fileService.getFileIncludingTrashed(id, principal.getApiKeyId(), principal.resolveUserId(userId));
 
-        fileService.softDeleteFile(id, principal.getApiKeyId(),
-                principal.resolveUserId(userId), principal.resolveUserName(userName));
+        // El autor manda el archivo a la papelera; el destinatario solo lo saca de SU vista.
+        // deletedAt en el archivo es global: si un destinatario lo usara, el documento
+        // desaparecería para todos, incluido quien lo creó.
+        boolean owner = shareService.isOwnerOrAdmin(
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal,
+                userId, userName);
+
+        String message;
+        if (owner) {
+            fileService.softDeleteFile(id, principal.getApiKeyId(),
+                    principal.resolveUserId(userId), principal.resolveUserName(userName));
+            message = "Archivo movido a la papelera";
+        } else {
+            shareService.discardForUser(
+                    com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id,
+                    principal.resolveUserId(userId));
+            message = "Archivo movido a tu papelera";
+        }
 
         ApiResponse<Void> response = ApiResponse.<Void>builder()
                 .success(true)
-                .message("Archivo movido a la papelera")
+                .message(message)
                 .build();
 
         return ResponseEntity.ok(response);
@@ -416,14 +432,30 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        assertOwnerOrAdmin(id, principal, userId, userName, "restaurar");
+        FileEntity fileEntity = fileService.getFileIncludingTrashed(
+                id, principal.getApiKeyId(), principal.resolveUserId(userId));
 
-        FileEntity fileEntity = fileService.restoreFile(id, principal.getApiKeyId(),
-                principal.resolveUserId(userId), principal.resolveUserName(userName));
+        // Simétrico al borrado: el autor devuelve el archivo desde la papelera del proyecto, el
+        // destinatario recupera su propio vínculo y el recurso reaparece en sus compartidos.
+        boolean owner = shareService.isOwnerOrAdmin(
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal,
+                userId, userName);
+
+        String message;
+        if (owner) {
+            fileEntity = fileService.restoreFile(id, principal.getApiKeyId(),
+                    principal.resolveUserId(userId), principal.resolveUserName(userName));
+            message = "Archivo restaurado correctamente";
+        } else {
+            shareService.restoreForUser(
+                    com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id,
+                    principal.resolveUserId(userId));
+            message = "Archivo devuelto a tus compartidos";
+        }
 
         ApiResponse<FileResponse> response = ApiResponse.<FileResponse>builder()
                 .success(true)
-                .message("Archivo restaurado correctamente")
+                .message(message)
                 .data(toFileResponse(fileEntity))
                 .build();
 

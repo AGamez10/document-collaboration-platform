@@ -45,6 +45,9 @@ public class SharedResourceResponse {
 
     private LocalDateTime createdAt;
 
+    /** Si quien recibe puede volver a compartir el recurso. */
+    private Boolean canShare;
+
     private LocalDateTime expiresAt;
 
 }

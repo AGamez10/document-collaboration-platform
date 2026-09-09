@@ -82,6 +82,28 @@ public class ShareController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Lo que le compartieron a esta persona y ella descartó de su vista.
+     *
+     * <p>Va aparte de {@code /api/files/trash} porque son cosas distintas: esa papelera lista
+     * archivos que el autor eliminó del proyecto, y ésta, vínculos que el destinatario ocultó sin
+     * tocar el original. El gestor las muestra juntas, pero restaurar cada una hace algo distinto.
+     */
+    @GetMapping("/trashed-with-me")
+    public ResponseEntity<ApiResponse<List<SharedResourceResponse>>> trashedWithMe(
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        List<SharedResourceResponse> data = shareService.trashedSharedWithMe(principal);
+
+        ApiResponse<List<SharedResourceResponse>> response = ApiResponse.<List<SharedResourceResponse>>builder()
+                .success(true)
+                .message("Compartidos en tu papelera listados correctamente")
+                .data(data)
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
     @GetMapping("/shared-with-me")
     public ResponseEntity<ApiResponse<List<SharedResourceResponse>>> sharedWithMe(
             @AuthenticationPrincipal ApiKeyPrincipal principal) {

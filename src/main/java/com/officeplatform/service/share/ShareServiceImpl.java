@@ -96,6 +96,10 @@ public class ShareServiceImpl implements ShareService {
             entity.setPermissionLevel(request.getPermissionLevel());
             entity.setExpiresAt(request.getExpiresAt());
             entity.setNotes(request.getNotes());
+            entity.setCanShare(Boolean.TRUE.equals(request.getCanShare()));
+            // Volver a compartir con alguien que lo tenia descartado se lo devuelve a la vista:
+            // dejarlo en su papelera haria que el nuevo permiso pareciera no haber llegado.
+            entity.setDeletedAt(null);
         } else {
             entity = SharePermissionEntity.builder()
                     .resourceType(request.getResourceType())
@@ -108,6 +112,7 @@ public class ShareServiceImpl implements ShareService {
                     .sharedByUserId(principal.resolveUserId(null))
                     .sharedByName(principal.resolveUserName(null))
                     .notes(request.getNotes())
+                    .canShare(Boolean.TRUE.equals(request.getCanShare()))
                     .build();
         }
 
@@ -253,7 +258,49 @@ public class ShareServiceImpl implements ShareService {
         if (userId == null || userId.isBlank()) {
             return List.of();
         }
-        return resolveShared(sharePermissionRepository.findAllByTargetTypeAndTargetUserId(TargetType.USER, userId));
+        // Lo descartado no se lista acá: vive en la papelera de esta persona hasta que decida
+        // restaurarlo o purgarlo, sin que el autor ni los demás destinatarios noten nada.
+        return resolveShared(sharePermissionRepository
+                .findAllByTargetTypeAndTargetUserIdAndDeletedAtIsNull(TargetType.USER, userId));
+    }
+
+    @Override
+    public List<SharedResourceResponse> trashedSharedWithMe(ApiKeyPrincipal principal) {
+        String userId = principal.resolveUserId(null);
+        if (userId == null || userId.isBlank()) {
+            return List.of();
+        }
+        return resolveShared(sharePermissionRepository
+                .findAllByTargetTypeAndTargetUserIdAndDeletedAtIsNotNull(TargetType.USER, userId));
+    }
+
+    @Override
+    @Transactional
+    public int discardForUser(ResourceType resourceType, Long resourceId, String targetUserId) {
+        return markGrants(resourceType, resourceId, targetUserId, LocalDateTime.now());
+    }
+
+    @Override
+    @Transactional
+    public int restoreForUser(ResourceType resourceType, Long resourceId, String targetUserId) {
+        return markGrants(resourceType, resourceId, targetUserId, null);
+    }
+
+    /** Escribe (o limpia) la marca de papelera sobre las concesiones de una persona. */
+    private int markGrants(ResourceType resourceType, Long resourceId, String targetUserId,
+                           LocalDateTime deletedAt) {
+        if (resourceId == null || targetUserId == null || targetUserId.isBlank()) {
+            return 0;
+        }
+        List<SharePermissionEntity> grants = sharePermissionRepository
+                .findAllByResourceTypeAndResourceIdAndTargetTypeAndTargetUserId(
+                        resourceType, resourceId, TargetType.USER, targetUserId.trim());
+        if (grants.isEmpty()) {
+            return 0;
+        }
+        grants.forEach(g -> g.setDeletedAt(deletedAt));
+        sharePermissionRepository.saveAll(grants);
+        return grants.size();
     }
 
     @Override
@@ -477,12 +524,40 @@ public class ShareServiceImpl implements ShareService {
         return isCreator(creatorUserId, creatorName, userId, userName);
     }
 
+    /**
+     * Quién puede repartir el acceso a un recurso.
+     *
+     * <p>Antes bastaba con tener nivel EDIT, y eso abría un agujero: un archivo sin restricciones
+     * resuelve EDIT para <b>cualquier</b> integrante del proyecto, así que cualquiera podía
+     * re-compartir lo ajeno. Ahora reparte el acceso quien lo creó, un administrador del proyecto,
+     * o un destinatario a quien le delegaron explícitamente esa facultad con {@code canShare}.
+     *
+     * <p>El nivel de permiso y la facultad de re-compartir son cosas distintas: EDIT dice qué puede
+     * hacerle al documento, {@code canShare} dice si puede dárselo a alguien más.
+     */
     private void assertCanManage(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {
-        SharePermissionEntity.PermissionLevel level = getEffectivePermission(resourceType, resourceId, principal);
-        if (level != SharePermissionEntity.PermissionLevel.EDIT) {
-            throw new ShareAccessDeniedException(
-                    "No tienes permisos suficientes para gestionar los permisos de este recurso. Se requiere nivel de edición (EDIT).");
+        if (isOwnerOrAdmin(resourceType, resourceId, principal)) {
+            return;
         }
+        if (hasDelegatedShare(resourceType, resourceId, principal)) {
+            return;
+        }
+        throw new ShareAccessDeniedException(
+                "No tienes permisos para compartir este recurso. Solo su autor, un administrador del "
+                        + "proyecto o alguien con la facultad de re-compartir puede hacerlo.");
+    }
+
+    /** Si a esta persona le compartieron el recurso permitiéndole volver a compartirlo. */
+    private boolean hasDelegatedShare(ResourceType resourceType, Long resourceId, ApiKeyPrincipal principal) {
+        String userId = normalizeIdentity(principal.resolveUserId(null));
+        if (userId == null || resourceId == null) {
+            return false;
+        }
+        return sharePermissionRepository
+                .findAllByResourceTypeAndResourceIdAndTargetTypeAndTargetUserId(
+                        resourceType, resourceId, TargetType.USER, userId)
+                .stream()
+                .anyMatch(SharePermissionEntity::canReshare);
     }
 
     /**
@@ -619,6 +694,9 @@ public class ShareServiceImpl implements ShareService {
                     permission.getSharedByName(),
                     permission.getNotes(),
                     permission.getCreatedAt(),
+                    // El gestor lo usa para mostrar u ocultar el botón de compartir: sin este dato
+                    // ofrecería una acción que el backend va a rechazar.
+                    permission.canReshare(),
                     permission.getExpiresAt()));
         }
         return out;
@@ -636,6 +714,7 @@ public class ShareServiceImpl implements ShareService {
                 entity.getPermissionLevel(),
                 entity.getSharedByUserId(),
                 entity.getSharedByName(),
+                entity.canReshare(),
                 entity.getNotes(),
                 entity.getCreatedAt(),
                 entity.getExpiresAt());

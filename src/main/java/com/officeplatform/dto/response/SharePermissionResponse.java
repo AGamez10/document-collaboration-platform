@@ -35,6 +35,9 @@ public class SharePermissionResponse {
 
     private String sharedByName;
 
+    /** Si quien recibe puede volver a compartir el recurso. */
+    private Boolean canShare;
+
     private String notes;
 
     private LocalDateTime createdAt;
