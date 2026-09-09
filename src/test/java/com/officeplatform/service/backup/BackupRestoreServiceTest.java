@@ -40,6 +40,7 @@ import com.officeplatform.dto.response.BackupRestoreResponse;
 import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
+import com.officeplatform.entity.KnownUserEntity;
 import com.officeplatform.entity.SharePermissionEntity;
 import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.FileRepository;
@@ -81,6 +82,7 @@ class BackupRestoreServiceTest {
     private final List<ApiKeyEntity> apiKeys = new ArrayList<>();
     private final Map<String, byte[]> stored = new LinkedHashMap<>();
     private final List<SharePermissionEntity> savedGrants = new ArrayList<>();
+    private final List<KnownUserEntity> savedUsers = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -131,6 +133,17 @@ class BackupRestoreServiceTest {
             stored.put(i.getArgument(0), i.<ByteArrayInputStream>getArgument(1).readAllBytes());
             return null;
         }).when(storageService).store(anyString(), any(), anyLong(), anyString());
+
+        lenient().when(knownUserRepository.findByApiKeyIdAndUserId(anyLong(), anyString()))
+                .thenAnswer(i -> savedUsers.stream()
+                        .filter(u -> i.getArgument(0).equals(u.getApiKeyId()))
+                        .filter(u -> i.getArgument(1).equals(u.getUserId()))
+                        .findFirst());
+        lenient().when(knownUserRepository.save(any(KnownUserEntity.class))).thenAnswer(i -> {
+            KnownUserEntity u = i.getArgument(0);
+            savedUsers.add(u);
+            return u;
+        });
 
         AtomicLong grantSeq = new AtomicLong(3000);
         lenient().when(sharePermissionRepository.save(any(SharePermissionEntity.class))).thenAnswer(i -> {
@@ -482,6 +495,54 @@ class BackupRestoreServiceTest {
         assertThat(savedGrants).isEmpty();
         assertThat(result.getSharePermissionsCreated()).isZero();
         assertThat(result.getFoldersCreated()).isEqualTo(2);
+    }
+
+    // ── asimetría deliberada del fallback de proyecto ────────────────────────
+
+    private Map<String, Object> knownUserNode(long apiKeyId, String userId, String displayName) {
+        Map<String, Object> n = new HashMap<>();
+        n.put("id", 700L);
+        n.put("apiKeyId", apiKeyId);
+        n.put("userId", userId);
+        n.put("displayName", displayName);
+        n.put("role", "user");
+        return n;
+    }
+
+    @Test
+    @DisplayName("a known user whose project is gone is skipped, never reassigned to another one")
+    void skipsAKnownUserWhoseProjectIsMissing() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        // Hay un proyecto disponible: si el fallback de carpetas y archivos se extendiera acá,
+        // esta persona quedaría inscrita en "Proyecto X" sin haber pertenecido nunca.
+        manifest.put("knownUsersMetadata", List.of(
+                knownUserNode(99L, "1004356866", "Ana Pérez")));
+
+        BackupRestoreResponse result = service.restore(
+                new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        assertThat(savedUsers).isEmpty();
+        assertThat(result.getKnownUsersCreated()).isZero();
+        assertThat(result.getWarnings()).anyMatch(w -> w.contains("Usuario conocido omitido"));
+        // Y la asimetría es real: la carpeta del mismo paquete SÍ se conserva, porque perder un
+        // documento es peor que ubicarlo mal, mientras que inventar una pertenencia es peor que
+        // perder un nombre para mostrar.
+        assertThat(result.getFoldersCreated()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("a known user whose project does map is restored normally")
+    void restoresAKnownUserWhoseProjectMaps() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        manifest.put("knownUsersMetadata", List.of(
+                knownUserNode(3L, "1004356866", "Ana Pérez")));
+
+        BackupRestoreResponse result = service.restore(
+                new ByteArrayInputStream(packageOf(manifest, Map.of())), "paquete.zip");
+
+        assertThat(savedUsers).hasSize(1);
+        assertThat(savedUsers.get(0).getDisplayName()).isEqualTo("Ana Pérez");
+        assertThat(result.getKnownUsersCreated()).isEqualTo(1);
     }
 
     @Test

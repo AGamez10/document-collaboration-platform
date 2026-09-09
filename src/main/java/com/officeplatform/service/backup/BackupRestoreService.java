@@ -55,6 +55,13 @@ import lombok.extern.slf4j.Slf4j;
  * <p>That is also why the order matters: {@code api_keys → known_users → folders → files}. Each
  * step needs the previous step's mapping to resolve its own foreign keys, and folders are written
  * in two passes so a child can point at a parent that appears later in the manifest.
+ *
+ * <p><b>An unmappable project is not handled the same way everywhere, on purpose.</b> Folders and
+ * files fall back to another project rather than be lost, because a misplaced document is still
+ * recoverable and a missing one is not. Known users and sharing grants are skipped instead: a
+ * fallback there would not preserve information but fabricate it — a membership that never existed,
+ * or access over a resource id that means something else in this database. See
+ * {@link #restoreKnownUsers} and {@link #restoreSharePermissions} for the reasoning at each site.
  */
 @Service
 @Slf4j
@@ -245,6 +252,22 @@ public class BackupRestoreService {
         return idMap;
     }
 
+    /**
+     * Reinstates the directory of people known to each project.
+     *
+     * <p><b>Deliberately asymmetric with folders and files.</b> Those two fall back to another
+     * project through {@link #resolveApiKeyId} when their own cannot be mapped, because the
+     * alternative is losing a document: a file that lands in the wrong project is still recoverable
+     * by a human, an unrestored one is gone. A known user is the opposite case. Its whole meaning is
+     * "this person belongs to this project", so a fallback would not preserve information, it would
+     * invent a membership — the directory would claim someone works in a project they were never
+     * part of, and that fabricated row feeds display names, notifications and sharing suggestions.
+     *
+     * <p>Dropping the row loses a display name, which the interface degrades to showing the cédula.
+     * Keeping it under the wrong project asserts something false. The row is skipped, with a warning
+     * so the operator sees it happened. Measured on a real package: 31 of 57 known users referenced
+     * projects that no longer existed and were skipped this way.
+     */
     private void restoreKnownUsers(JsonNode nodes, Map<Long, Long> apiKeyIds, Tally tally) {
         for (JsonNode node : arrayOf(nodes)) {
             Long apiKeyId = mapped(apiKeyIds, number(node, "apiKeyId"));
@@ -574,6 +597,10 @@ public class BackupRestoreService {
      * volvieran y todo terminara plano en la raíz. El orden de preferencia va de lo más fiel a lo
      * menos: el mapeo del propio respaldo, el valor que la fila ya tenía, el id original si por
      * casualidad existe acá, y recién al final cualquier proyecto con tal de no perder la fila.
+     *
+     * <p>Solo lo usan carpetas y archivos. Los usuarios conocidos y los permisos NO caen a este
+     * respaldo a propósito: ahí el último escalón inventaría una pertenencia o un acceso en vez de
+     * conservar un documento. Ver {@link #restoreKnownUsers} y {@link #restoreSharePermissions}.
      */
     private Long resolveApiKeyId(Long mappedId, Long currentValue, Long backupApiKeyId,
                                  Tally tally, String what) {

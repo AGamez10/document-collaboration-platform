@@ -344,7 +344,29 @@ Crear un `.docx`, `.xlsx` o `.pptx` en blanco no requiere Apache POI. `DocxUtils
 
 ### 8. Copias de seguridad con *streaming*, no en memoria
 
-Un respaldo debe poder incluir gigabytes de binarios. `BackupServiceImpl` escribe el ZIP a disco haciendo *streaming* de cada objeto desde MinIO, sin materializar el paquete en memoria, y acompaña los binarios con un `manifest.json` que preserva la estructura de carpetas y los metadatos necesarios para restaurar.
+Un respaldo debe poder incluir gigabytes de binarios. `BackupServiceImpl` escribe el ZIP a disco haciendo *streaming* de cada objeto desde MinIO, sin materializar el paquete en memoria. La única excepción es un archivo que además deba copiarse a la carpeta «Compartidos conmigo» de algún destinatario: ese se lee una vez a memoria y se escribe varias, porque volver a pedirlo al almacenamiento por cada destinatario multiplicaría las descargas sin ganar nada.
+
+Los binarios se guardan bajo una ruta legible que reproduce lo que la persona ve en el gestor, de modo que el paquete siga siendo útil abierto en el Explorador cuando la plataforma no está disponible:
+
+```
+archivos/{proyecto}/Compartidos por Area/{carpetas}/{archivo}
+archivos/{proyecto}/Usuarios/{cédula - nombre}/Mis Archivos/{carpetas}/{archivo}
+archivos/{proyecto}/Usuarios/{cédula - nombre}/Compartidos conmigo/{archivo}
+```
+
+El `manifest.json` acompaña los binarios con la estructura de carpetas, los permisos de compartido y la ruta exacta (`zipEntryPath`) donde quedó cada objeto.
+
+### 8.1. Qué hace la restauración cuando un proyecto ya no existe
+
+Las filas se emparejan por clave de negocio, nunca por id numérico, porque los ids del respaldo pertenecen a la instancia que lo generó. Cuando una fila apunta a un proyecto que no viaja en el paquete, **el criterio no es el mismo en todas las tablas, y es deliberado**:
+
+| Tabla | Sin proyecto mapeable | Motivo |
+|---|---|---|
+| `folders`, `files` | Se reasignan a otro proyecto | Un documento mal ubicado se recupera a mano; uno que no se restaura, no. |
+| `known_users` | Se omite, con aviso | El fallback no conservaría información: inventaría una pertenencia a un proyecto del que esa persona nunca formó parte. Se pierde el nombre visible, que la interfaz degrada a la cédula. |
+| `share_permissions` | Se omite, con aviso | Conceder acceso sobre un id que aquí significa otro recurso abriría un documento ajeno. |
+
+La restauración es idempotente: repetirla sobre datos ya restaurados actualiza las filas en lugar de duplicarlas. La respuesta informa cuántas filas se crearon, cuántas se actualizaron y la lista de omisiones, para que el operador vea exactamente qué no volvió.
 
 ### 9. Cerrar una sesión de edición de verdad
 
