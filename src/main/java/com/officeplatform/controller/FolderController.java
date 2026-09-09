@@ -223,6 +223,24 @@ public class FolderController {
         return ResponseEntity.ok(response);
     }
 
+    /** Carpetas que esta persona envió a su papelera. */
+    @GetMapping("/trash")
+    public ResponseEntity<ApiResponse<List<FolderResponse>>> trash(
+            @RequestParam(required = false) String userId,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        List<FolderResponse> data = folderService.listTrash(principal.resolveUserId(userId))
+                .stream().map(this::toFolderResponse).toList();
+
+        ApiResponse<List<FolderResponse>> response = ApiResponse.<List<FolderResponse>>builder()
+                .success(true)
+                .message("Carpetas en la papelera listadas correctamente")
+                .data(data)
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
     /** Devuelve una carpeta desde la papelera a la ubicación que tenía antes de eliminarse. */
     @PostMapping("/{id}/restore")
     public ResponseEntity<ApiResponse<FolderResponse>> restore(

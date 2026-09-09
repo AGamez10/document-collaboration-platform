@@ -18,6 +18,9 @@ public interface FolderService {
      */
     void deleteFolder(Long folderId, Long apiKeyId, String userId, String userName);
 
+    /** Carpetas que esta persona envio a su papelera. */
+    List<FolderEntity> listTrash(String userId);
+
     /** Devuelve una carpeta y su subarbol desde la papelera a su ubicacion anterior. */
     FolderEntity restoreFolder(Long folderId, Long apiKeyId, String userId, String userName);
 

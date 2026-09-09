@@ -157,6 +157,31 @@ public class FolderServiceImpl implements FolderService {
     }
 
     /**
+     * Carpetas que esta persona envió a su papelera.
+     *
+     * <p>Solo las raíces de cada eliminación: mostrar también las subcarpetas arrastradas llenaría
+     * la papelera de filas que la persona nunca eliminó una por una, y restaurar la raíz ya las
+     * devuelve a todas.
+     */
+    @Override
+    public List<FolderEntity> listTrash(String userId) {
+        if (userId == null || userId.isBlank()) {
+            return List.of();
+        }
+        List<FolderEntity> deleted = folderRepository
+                .findAllByDeletedByUserIdAndDeletedAtIsNotNull(userId.trim());
+        Set<Long> deletedIds = new HashSet<>();
+        deleted.forEach(f -> deletedIds.add(f.getId()));
+        List<FolderEntity> roots = new ArrayList<>();
+        for (FolderEntity folder : deleted) {
+            if (folder.getParentId() == null || !deletedIds.contains(folder.getParentId())) {
+                roots.add(folder);
+            }
+        }
+        return roots;
+    }
+
+    /**
      * Devuelve una carpeta y su subárbol desde la papelera a su ubicación anterior.
      *
      * <p>El {@code parentId} nunca se tocó al eliminar, así que la jerarquía se reconstruye sola.

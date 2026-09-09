@@ -1788,6 +1788,33 @@
     await apiFetch('/api/files/' + id + '/purge', { method: 'DELETE' });
   }
 
+  // ── Papelera de carpetas y de compartidos ────────────────────────────────
+  // Son tres orígenes distintos porque significan cosas distintas: un archivo que su autor
+  // eliminó, una carpeta con su subárbol, y un vínculo que el destinatario sacó de su vista sin
+  // tocar el original. La papelera los muestra juntos, pero restaurar cada uno hace algo distinto.
+
+  async function listTrashedFolders() {
+    const res = await apiFetch('/api/folders/trash');
+    const j = await res.json();
+    return j.data || [];
+  }
+
+  async function restoreFolderFromTrash(id) {
+    const res = await apiFetch('/api/folders/' + id + '/restore', { method: 'POST' });
+    const j = await res.json();
+    return j.data;
+  }
+
+  async function purgeFolder(id) {
+    await apiFetch('/api/folders/' + id + '/purge', { method: 'DELETE' });
+  }
+
+  async function listTrashedWithMe() {
+    const res = await apiFetch('/api/share/trashed-with-me');
+    const j = await res.json();
+    return j.data || [];
+  }
+
   async function renameFile(id, name) {
     const res = await apiFetch('/api/files/' + id + '/rename', {
       method: 'PATCH',
@@ -3804,7 +3831,15 @@
     return items;
   }
 
-  function folderContextMenuItems(folder) {
+  function folderContextMenuItems(folder, trashed) {
+    // En la papelera una carpeta no se abre ni se renombra: las únicas acciones con sentido son
+    // devolverla o borrarla. Ofrecer las otras dejaría entrar a algo que ya no existe.
+    if (trashed) {
+      return [
+        menuItem('Restaurar', ICONS.restore, false, function () { handleRestore(folder); }),
+        menuItem('Eliminar permanentemente', ICONS.trash, true, function () { handlePurge(folder); }),
+      ];
+    }
     const items = [
       menuItem('Abrir', ICONS.open, false, function () { navigateToFolder(folder); }),
       menuItem('Renombrar', ICONS.rename, false, function () { handleRenameFolder(folder); }),
@@ -3885,6 +3920,7 @@
     files: null,             // active files cache (current folder), null = not loaded yet
     allFiles: null,          // flat cache across all folders, backs the 'recent' section
     trash: null,             // trashed files cache, null = not loaded yet
+    trashFolders: [],        // trashed folders, rendered alongside the files
     folders: null,           // sub-folders of the current folder, null = not loaded yet
     filesError: false,
     allFilesError: false,
@@ -3993,14 +4029,38 @@
       _content.innerHTML = '';
       _content.appendChild(buildLoadingState());
     }
-    return listTrash().then(function (files) {
-      state.trash = files;
-      state.trashError = false;
-    }).catch(function () {
-      state.trashError = true;
-    }).then(function () {
-      if (state.section === 'trash') renderContent();
-    });
+    // Los tres orígenes se piden en paralelo y por separado: si el proyecto no expone alguno
+    // (una versión anterior del backend), la papelera muestra lo que sí pudo traer en vez de
+    // quedarse vacía por un 404 en una de las tres llamadas.
+    return Promise.allSettled([listTrash(), listTrashedFolders(), listTrashedWithMe()])
+      .then(function (results) {
+        const files = results[0].status === 'fulfilled' ? results[0].value : [];
+        const folders = results[1].status === 'fulfilled' ? results[1].value : [];
+        const shared = results[2].status === 'fulfilled' ? results[2].value : [];
+
+        // Lo compartido se normaliza a la forma de un archivo para que la grilla lo dibuje sin
+        // conocer su origen; __kind es lo que después decide a qué endpoint llamar.
+        const sharedAsFiles = shared.map(function (r) {
+          return {
+            id: r.resourceId,
+            originalFileName: r.resourceName,
+            mimeType: r.mimeType,
+            createdByName: r.sharedByName,
+            deletedAt: r.createdAt,
+            __kind: r.resourceType === 'FOLDER' ? 'shared-folder' : 'shared-file',
+            __permissionId: r.permissionId,
+          };
+        });
+        files.forEach(function (f) { f.__kind = 'file'; });
+        folders.forEach(function (f) { f.__kind = 'folder'; });
+
+        state.trash = files.concat(sharedAsFiles);
+        state.trashFolders = folders;
+        state.trashError = results[0].status === 'rejected';
+      })
+      .then(function () {
+        if (state.section === 'trash') renderContent();
+      });
   }
 
   // ── "Compartidos conmigo" (shared-with-me + shared-with-project) ─────────
@@ -4171,9 +4231,43 @@
     });
   }
 
+  /** A qué endpoint va cada elemento de la papelera, según de dónde salió. */
+  function restoreTrashItem(item) {
+    if (item.__kind === 'folder' || item.__kind === 'shared-folder') {
+      return restoreFolderFromTrash(item.id);
+    }
+    return restoreFile(item.id);
+  }
+
+  function purgeTrashItem(item) {
+    if (item.__kind === 'folder' || item.__kind === 'shared-folder') {
+      return purgeFolder(item.id);
+    }
+    return purgeFile(item.id);
+  }
+
+  /** Un compartido no se destruye al purgarlo: el destinatario solo renuncia a su acceso. */
+  function isSharedTrashItem(item) {
+    return item.__kind === 'shared-file' || item.__kind === 'shared-folder';
+  }
+
+  /** Recupera el elemento de la papelera por id, para saber a qué endpoint mandarlo. */
+  function trashItemById(id) {
+    const files = state.trash || [];
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].id === id) return files[i];
+    }
+    const folders = state.trashFolders || [];
+    for (let j = 0; j < folders.length; j++) {
+      if (folders[j].id === id) return folders[j];
+    }
+    return null;
+  }
+
   function handleRestore(file) {
-    restoreFile(file.id).then(function () {
-      toast('Archivo restaurado', 'success');
+    restoreTrashItem(file).then(function () {
+      toast(isSharedTrashItem(file) ? 'Devuelto a tus compartidos' : 'Restaurado a su ubicación original',
+            'success');
       state.selected.delete(file.id);
       loadTrash();
       loadFiles();
@@ -4185,7 +4279,8 @@
   function handleBatchRestore() {
     const ids = Array.from(state.selected);
     if (ids.length === 0) return;
-    Promise.allSettled(ids.map(function (id) { return restoreFile(id); })).then(function (results) {
+    const items = ids.map(trashItemById).filter(Boolean);
+    Promise.allSettled(items.map(restoreTrashItem)).then(function (results) {
       const success = results.filter(function (r) { return r.status === 'fulfilled'; }).length;
       const failed = results.length - success;
       toast(
@@ -4201,12 +4296,16 @@
   function handlePurge(file) {
     showModal({
       title: 'Eliminar permanentemente',
-      message: 'Esta acción no se puede deshacer. "' + file.originalFileName + '" se eliminará permanentemente.',
+      message: isSharedTrashItem(file)
+        ? '"' + file.originalFileName + '" dejará de estar compartido con vos. El archivo original '
+          + 'no se toca: su autor lo conserva.'
+        : 'Esta acción no se puede deshacer. "' + file.originalFileName + '" se eliminará permanentemente.',
       confirmLabel: 'Eliminar permanentemente',
       danger: true,
       onConfirm: function () {
-        purgeFile(file.id).then(function () {
-          toast('Archivo eliminado permanentemente', 'success');
+        purgeTrashItem(file).then(function () {
+          toast(isSharedTrashItem(file) ? 'Quitado de tus compartidos' : 'Eliminado permanentemente',
+                'success');
           state.selected.delete(file.id);
           loadTrash();
         }).catch(function (err) {
@@ -4225,7 +4324,8 @@
       confirmLabel: 'Eliminar permanentemente',
       danger: true,
       onConfirm: function () {
-        Promise.allSettled(ids.map(function (id) { return purgeFile(id); })).then(function (results) {
+        const items = ids.map(trashItemById).filter(Boolean);
+        Promise.allSettled(items.map(purgeTrashItem)).then(function (results) {
           const success = results.filter(function (r) { return r.status === 'fulfilled'; }).length;
           const failed = results.length - success;
           toast(
@@ -4519,7 +4619,7 @@
     menuBtn.className = 'op-card-menu-btn';
     menuBtn.setAttribute('aria-label', 'Más acciones');
     menuBtn.innerHTML = ICONS.dots;
-    menuBtn.onclick = function (e) { e.stopPropagation(); showContextMenu(menuBtn, folderContextMenuItems(folder)); };
+    menuBtn.onclick = function (e) { e.stopPropagation(); showContextMenu(menuBtn, folderContextMenuItems(folder, folder.__kind === 'folder' && state.section === 'trash')); };
     card.appendChild(menuBtn);
 
     const iconWrap = document.createElement('div');
@@ -4549,7 +4649,7 @@
     card.onclick = function () { navigateToFolder(folder); };
     card.oncontextmenu = function (e) {
       e.preventDefault();
-      showContextMenu(menuBtn, folderContextMenuItems(folder));
+      showContextMenu(menuBtn, folderContextMenuItems(folder, folder.__kind === 'folder' && state.section === 'trash'));
     };
     wireFolderDropTarget(card, folder.id);
 
@@ -4682,14 +4782,14 @@
     menuBtn.className = 'op-menu-btn';
     menuBtn.setAttribute('aria-label', 'Más acciones');
     menuBtn.innerHTML = ICONS.dots;
-    menuBtn.onclick = function (e) { e.stopPropagation(); showContextMenu(menuBtn, folderContextMenuItems(folder)); };
+    menuBtn.onclick = function (e) { e.stopPropagation(); showContextMenu(menuBtn, folderContextMenuItems(folder, folder.__kind === 'folder' && state.section === 'trash')); };
     tdActions.appendChild(menuBtn);
     tr.appendChild(tdActions);
 
     tr.onclick = function () { navigateToFolder(folder); };
     tr.oncontextmenu = function (e) {
       e.preventDefault();
-      showContextMenu(menuBtn, folderContextMenuItems(folder));
+      showContextMenu(menuBtn, folderContextMenuItems(folder, folder.__kind === 'folder' && state.section === 'trash'));
     };
     wireFolderDropTarget(tr, folder.id);
 
@@ -4806,7 +4906,7 @@
         updateBatchBar();
         return;
       }
-      renderList(state.trash, true, []);
+      renderList(state.trash, true, state.trashFolders || []);
       return;
     }
 
@@ -4928,6 +5028,18 @@
       card.appendChild(note);
     }
 
+    // Acciones sobre lo que me compartieron. El menú se detiene en la tarjeta para no disparar
+    // la apertura del recurso que vive en el click del contenedor.
+    const menuBtn = document.createElement('button');
+    menuBtn.type = 'button';
+    menuBtn.className = 'op-card-menu';
+    menuBtn.innerHTML = ICONS.dots;
+    menuBtn.onclick = function (e) {
+      e.stopPropagation();
+      showContextMenu(menuBtn, sharedWithMeMenuItems(resource));
+    };
+    card.appendChild(menuBtn);
+
     // Files open in the editor. Cross-project resources may not resolve (the editor is scoped to the
     // caller's project); that surfaces as a toast from openEditor, which is acceptable for now.
     if (resource.resourceType === 'FILE') {
@@ -4940,6 +5052,62 @@
       };
     }
     return card;
+  }
+
+  /**
+   * Acciones disponibles sobre un recurso que me compartieron.
+   *
+   * <p>Compartir aparece solo con delegación explícita. El backend la exige igual, así que
+   * mostrarla sin permiso sería ofrecer un botón que devuelve 403: la interfaz no debe prometer
+   * lo que el servidor va a negar.
+   */
+  function sharedWithMeMenuItems(resource) {
+    const items = [];
+    if (resource.resourceType === 'FILE') {
+      items.push(menuItem('Abrir', ICONS.open, false, function () {
+        openEditor(resource.resourceId, resource.resourceName);
+      }));
+      items.push(menuItem('Descargar', ICONS.download, false, function () {
+        downloadSingle(resource.resourceId, resource.resourceName);
+      }));
+    }
+    if (resource.canShare === true) {
+      items.push(menuItem('Compartir', ICONS.share, false, function () {
+        openShareModal(resource.resourceType, resource.resourceId, resource.resourceName);
+      }));
+    }
+    items.push(menuItem('Quitar de mis compartidos', ICONS.trash, true, function () {
+      handleDiscardShared(resource);
+    }));
+    return items;
+  }
+
+  /**
+   * Manda a mi papelera algo que me compartieron.
+   *
+   * <p>No destruye nada: el backend marca mi vínculo y el original sigue intacto para su autor y
+   * para el resto de los destinatarios. Por eso el mensaje habla de mi vista y no de eliminar.
+   */
+  function handleDiscardShared(resource) {
+    const isFolder = resource.resourceType === 'FOLDER';
+    showModal({
+      title: 'Quitar de mis compartidos',
+      message: '"' + resource.resourceName + '" pasa a tu papelera. El original no se toca: su '
+        + 'autor y el resto de las personas lo siguen viendo. Podés recuperarlo cuando quieras.',
+      confirmLabel: 'Mover a mi papelera',
+      onConfirm: function () {
+        const request = isFolder
+          ? apiFetch('/api/folders/' + resource.resourceId, { method: 'DELETE' })
+          : deleteFile(resource.resourceId);
+        Promise.resolve(request).then(function () {
+          toast('Movido a tu papelera', 'success');
+          loadSharedWithMe();
+          if (state.trash !== null) loadTrash();
+        }).catch(function (err) {
+          toast('No se pudo quitar: ' + err.message, 'error');
+        });
+      },
+    });
   }
 
   // ── Folder navigation ────────────────────────────────────────────────────
