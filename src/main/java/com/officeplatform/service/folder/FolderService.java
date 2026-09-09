@@ -18,6 +18,12 @@ public interface FolderService {
      */
     void deleteFolder(Long folderId, Long apiKeyId, String userId, String userName);
 
+    /** Devuelve una carpeta y su subarbol desde la papelera a su ubicacion anterior. */
+    FolderEntity restoreFolder(Long folderId, Long apiKeyId, String userId, String userName);
+
+    /** Elimina definitivamente una carpeta de la papelera, con su subarbol y sus binarios. */
+    void purgeFolder(Long folderId, Long apiKeyId, String userId, String userName);
+
     List<FolderEntity> listFolders(Long parentId, Long apiKeyId, String userId, String scope);
 
     /** Searches folders by name (LIKE %term%) across all parents, scoped to private or shared. */

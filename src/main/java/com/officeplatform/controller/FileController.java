@@ -437,14 +437,32 @@ public class FileController {
             @RequestParam(required = false) String userName,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
 
-        assertOwnerOrAdmin(id, principal, userId, userName, "eliminar permanentemente");
+        // Se resuelve primero para que un id inexistente responda 404 y no "no eres el propietario".
+        fileService.getFileIncludingTrashed(id, principal.getApiKeyId(), principal.resolveUserId(userId));
 
-        fileService.purgeFile(id, principal.getApiKeyId(),
-                principal.resolveUserId(userId), principal.resolveUserName(userName));
+        // Vaciar la papelera no puede depender de ser el autor. Antes esto exigía ser dueño o
+        // administrador y devolvía 403 sobre cada archivo que a la persona le habían compartido:
+        // la papelera quedaba con "X con error" y era imposible de limpiar. El autor borra de
+        // verdad; el destinatario solo renuncia a su propio acceso y el original queda intacto.
+        boolean owner = shareService.isOwnerOrAdmin(
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal,
+                userId, userName);
+
+        String message;
+        if (owner) {
+            fileService.purgeFile(id, principal.getApiKeyId(),
+                    principal.resolveUserId(userId), principal.resolveUserName(userName));
+            message = "Archivo eliminado permanentemente";
+        } else {
+            shareService.revokeAccessForUser(
+                    com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id,
+                    principal.resolveUserId(userId));
+            message = "Archivo quitado de tus compartidos";
+        }
 
         ApiResponse<Void> response = ApiResponse.<Void>builder()
                 .success(true)
-                .message("Archivo eliminado permanentemente")
+                .message(message)
                 .build();
 
         return ResponseEntity.ok(response);

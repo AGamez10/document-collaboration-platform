@@ -180,6 +180,29 @@ public class ShareServiceImpl implements ShareService {
                 .toList();
     }
 
+    /**
+     * Quita el acceso de una persona sobre un recurso, sin tocar el recurso ni el de los demás.
+     *
+     * <p>No exige ser dueño ni administrador, y es intencional: la única acción que habilita es
+     * renunciar al propio acceso. Alguien que retira su propia concesión no le quita nada a nadie,
+     * y exigir permisos acá era justo lo que dejaba la papelera imposible de vaciar.
+     */
+    @Override
+    @Transactional
+    public int revokeAccessForUser(ResourceType resourceType, Long resourceId, String targetUserId) {
+        if (resourceId == null || targetUserId == null || targetUserId.isBlank()) {
+            return 0;
+        }
+        List<SharePermissionEntity> grants = sharePermissionRepository
+                .findAllByResourceTypeAndResourceIdAndTargetTypeAndTargetUserId(
+                        resourceType, resourceId, TargetType.USER, targetUserId.trim());
+        if (grants.isEmpty()) {
+            return 0;
+        }
+        sharePermissionRepository.deleteAll(grants);
+        return grants.size();
+    }
+
     @Override
     @Transactional
     public void revoke(Long permissionId, ApiKeyPrincipal principal) {

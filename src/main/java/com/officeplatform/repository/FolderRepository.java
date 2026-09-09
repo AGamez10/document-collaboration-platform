@@ -48,4 +48,35 @@ public interface FolderRepository extends JpaRepository<FolderEntity, Long> {
 
     Optional<FolderEntity> findByUuid(String uuid);
 
+    // ── Papelera de carpetas ────────────────────────────────────────────────
+    // Las consultas de arriba NO filtran por deletedAt a propósito: las usa el respaldo, que debe
+    // llevarse la papelera con sus marcas de tiempo, y la restauración, que necesita encontrar
+    // justamente lo eliminado. Los listados del gestor usan las variantes de acá abajo.
+
+    List<FolderEntity> findAllByApiKeyIdAndParentIdIsNullAndDeletedAtIsNull(Long apiKeyId);
+
+    List<FolderEntity> findAllByApiKeyIdAndParentIdIsNullAndUserIdIsNullAndDeletedAtIsNull(Long apiKeyId);
+
+    List<FolderEntity> findAllByApiKeyIdAndParentIdAndDeletedAtIsNull(Long apiKeyId, Long parentId);
+
+    List<FolderEntity> findAllByParentIdAndDeletedAtIsNull(Long parentId);
+
+    List<FolderEntity> findAllByUserIdAndParentIdIsNullAndDeletedAtIsNull(String userId);
+
+    List<FolderEntity> findAllByUserIdAndParentIdAndDeletedAtIsNull(String userId, Long parentId);
+
+    List<FolderEntity> findAllByApiKeyIdAndNameContainingIgnoreCaseAndDeletedAtIsNull(Long apiKeyId, String term);
+
+    List<FolderEntity> findAllByApiKeyIdAndUserIdAndNameContainingIgnoreCaseAndDeletedAtIsNull(
+            Long apiKeyId, String userId, String term);
+
+    List<FolderEntity> findAllByApiKeyIdAndUserIdIsNullAndNameContainingIgnoreCaseAndDeletedAtIsNull(
+            Long apiKeyId, String term);
+
+    /** Carpetas que una persona envió a su papelera, sin filtrar por proyecto. */
+    List<FolderEntity> findAllByDeletedByUserIdAndDeletedAtIsNotNull(String deletedByUserId);
+
+    /** Subcarpetas eliminadas, para poder restaurar o purgar el árbol completo. */
+    List<FolderEntity> findAllByParentIdAndDeletedAtIsNotNull(Long parentId);
+
 }

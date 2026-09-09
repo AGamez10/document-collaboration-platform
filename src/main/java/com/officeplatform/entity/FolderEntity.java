@@ -21,7 +21,8 @@ import lombok.NoArgsConstructor;
         @Index(name = "idx_folder_uuid", columnList = "uuid", unique = true),
         @Index(name = "idx_folder_api_key_id", columnList = "api_key_id"),
         @Index(name = "idx_folder_parent_id", columnList = "parent_id"),
-        @Index(name = "idx_folder_user_id", columnList = "user_id")
+        @Index(name = "idx_folder_user_id", columnList = "user_id"),
+        @Index(name = "idx_folder_deleted_at", columnList = "deleted_at")
 })
 @Data
 @NoArgsConstructor
@@ -63,6 +64,24 @@ public class FolderEntity {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /**
+     * Papelera de carpetas. Null significa activa.
+     *
+     * <p>Antes las carpetas se borraban físicamente y sus archivos perdían el {@code folderId} para
+     * no quedar apuntando a una fila inexistente. El costo era que restaurar un archivo lo dejaba en
+     * la raíz: su ubicación original ya no existía en ninguna parte. Con el borrado lógico la
+     * jerarquía sobrevive y la restauración puede devolver cada cosa a su lugar exacto.
+     *
+     * <p>Columna anulable a propósito: {@code ddl-auto=update} la agrega sobre una tabla con filas,
+     * y las carpetas existentes quedan con null, que es justo lo que significa "no eliminada".
+     */
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    /** Quién la envió a la papelera, para que cada persona vea la suya. */
+    @Column(name = "deleted_by_user_id")
+    private String deletedByUserId;
 
     @PrePersist
     protected void onCreate() {

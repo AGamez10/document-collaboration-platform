@@ -217,7 +217,66 @@ public class FolderController {
 
         ApiResponse<Void> response = ApiResponse.<Void>builder()
                 .success(true)
-                .message("Carpeta eliminada correctamente")
+                .message("Carpeta movida a la papelera")
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    /** Devuelve una carpeta desde la papelera a la ubicación que tenía antes de eliminarse. */
+    @PostMapping("/{id}/restore")
+    public ResponseEntity<ApiResponse<FolderResponse>> restore(
+            @PathVariable Long id,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String userName,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        assertFolderOwnerOrAdmin(id, principal, userId, userName, "restaurar");
+
+        FolderEntity folder = folderService.restoreFolder(id, principal.getApiKeyId(),
+                principal.resolveUserId(userId), principal.resolveUserName(userName));
+
+        ApiResponse<FolderResponse> response = ApiResponse.<FolderResponse>builder()
+                .success(true)
+                .message("Carpeta restaurada correctamente")
+                .data(toFolderResponse(folder))
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Elimina definitivamente una carpeta de la papelera.
+     *
+     * <p>El destinatario de una carpeta compartida solo renuncia a su acceso: destruir la carpeta
+     * del autor sería desproporcionado, y negarse con un 403 dejaba la papelera imposible de vaciar.
+     */
+    @DeleteMapping("/{id}/purge")
+    public ResponseEntity<ApiResponse<Void>> purge(
+            @PathVariable Long id,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String userName,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        boolean owner = shareService.isOwnerOrAdmin(
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, id, principal,
+                userId, userName);
+
+        String message;
+        if (owner) {
+            folderService.purgeFolder(id, principal.getApiKeyId(),
+                    principal.resolveUserId(userId), principal.resolveUserName(userName));
+            message = "Carpeta eliminada permanentemente";
+        } else {
+            shareService.revokeAccessForUser(
+                    com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, id,
+                    principal.resolveUserId(userId));
+            message = "Carpeta quitada de tus compartidos";
+        }
+
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+                .success(true)
+                .message(message)
                 .build();
 
         return ResponseEntity.ok(response);

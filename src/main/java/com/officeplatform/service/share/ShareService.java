@@ -21,6 +21,17 @@ public interface ShareService {
     /** Revokes a permission by id (creator/admin only, and only within the caller's project). */
     void revoke(Long permissionId, ApiKeyPrincipal principal);
 
+    /**
+     * Quita el acceso de una persona sobre un recurso, sin tocar el recurso ni el de los demas.
+     *
+     * <p>Es lo que ocurre cuando alguien vacia su papelera y ahi hay algo que le compartieron:
+     * destruir el archivo del autor seria desproporcionado, y negarse con un 403 dejaba la papelera
+     * imposible de limpiar.
+     *
+     * @return cuantas concesiones se retiraron
+     */
+    int revokeAccessForUser(ResourceType resourceType, Long resourceId, String targetUserId);
+
     /** Resources shared directly with the calling user. */
     List<SharedResourceResponse> sharedWithMe(ApiKeyPrincipal principal);
 

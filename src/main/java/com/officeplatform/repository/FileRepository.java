@@ -131,4 +131,11 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
             + "from FileEntity f where f.deletedAt is null group by f.apiKeyId")
     List<Object[]> countAndSizeByApiKeyGrouped();
 
+
+    /** Archivos de una carpeta que estan en la papelera, para restaurarlos con ella. */
+    List<FileEntity> findAllByFolderIdAndDeletedAtIsNotNull(Long folderId);
+
+    /** Todos los archivos de una carpeta, vivos o en papelera, para purgar el arbol. */
+    List<FileEntity> findAllByFolderId(Long folderId);
+
 }

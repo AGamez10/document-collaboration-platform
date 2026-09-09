@@ -83,6 +83,30 @@ public class SharePermissionEntity {
     @Column(name = "permission_level", nullable = false)
     private PermissionLevel permissionLevel;
 
+    /**
+     * Whether the recipient may re-share the resource with other people.
+     *
+     * <p><b>A flag and not a fourth {@link PermissionLevel} on purpose.</b> Hibernate emits a CHECK
+     * constraint listing the enum values when it creates the table, and {@code ddl-auto=update}
+     * never alters it: {@code share_permissions_permission_level_check} still allows only VIEW,
+     * DOWNLOAD and EDIT on every database created before this change. A new enum constant would
+     * compile, pass the tests against H2 — which builds the schema from scratch — and then fail in
+     * production the first time someone granted it. The same trap already broke this project twice
+     * through {@code activity_log_action_check}.
+     *
+     * <p>{@code Boolean} rather than {@code boolean}, and nullable in the database, because
+     * {@code ddl-auto=update} adds the column to a table that already holds rows: a NOT NULL column
+     * with no default would fail outright. Existing grants read back as null, which
+     * {@link #canReshare()} treats as "not allowed" — the safe reading for a permission.
+     */
+    @Column(name = "can_share")
+    private Boolean canShare;
+
+    /** Null-safe read: an older grant with no value stored may not re-share. */
+    public boolean canReshare() {
+        return Boolean.TRUE.equals(canShare);
+    }
+
     // ── Who shared it ───────────────────────────────────────────────────────
     @Column(name = "shared_by_user_id")
     private String sharedByUserId;

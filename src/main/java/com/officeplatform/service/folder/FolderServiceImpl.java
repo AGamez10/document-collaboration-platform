@@ -129,31 +129,132 @@ public class FolderServiceImpl implements FolderService {
                 .orElseThrow(() -> new FolderNotFoundException(folderId));
 
         List<FolderEntity> tree = collectFolderTree(folder, apiKeyId);
+        LocalDateTime now = LocalDateTime.now();
 
         int filesMoved = 0;
         for (FolderEntity node : tree) {
             List<FileEntity> files = fileRepository.findAllByApiKeyIdAndFolderIdAndDeletedAtIsNull(apiKeyId, node.getId());
             for (FileEntity file : files) {
-                file.setDeletedAt(LocalDateTime.now());
-                // Detached from the folder on purpose. Folders are removed from the database
-                // below, so a file keeping its folder_id would point at a row that no longer
-                // exists: restoring it later left it invisible — absent from the root listing
-                // (folder_id is not null) and from every folder listing (its folder is gone).
-                // Clearing the reference makes a restored file reappear at the root of the space
-                // it belonged to, which is the only location that still exists.
-                file.setFolderId(null);
+                file.setDeletedAt(now);
+                // El folderId se CONSERVA. Antes se ponía en null porque la carpeta se borraba
+                // físicamente y la referencia habría quedado colgando; ahora la carpeta sobrevive
+                // marcada como eliminada, así que la ubicación original se preserva y restaurar
+                // devuelve el archivo exactamente a donde estaba.
             }
             fileRepository.saveAll(files);
             filesMoved += files.size();
-        }
 
-        folderRepository.deleteAll(tree);
+            node.setDeletedAt(now);
+            node.setDeletedByUserId(userId);
+        }
+        folderRepository.saveAll(tree);
 
         activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.DELETE_FOLDER,
                 null, folder.getName(),
-                "Carpeta eliminada. Sub-carpetas eliminadas: " + (tree.size() - 1)
-                        + ", archivos movidos a la papelera: " + filesMoved,
+                "Carpeta enviada a la papelera. Sub-carpetas: " + (tree.size() - 1)
+                        + ", archivos: " + filesMoved,
                 folder.getId());
+    }
+
+    /**
+     * Devuelve una carpeta y su subárbol desde la papelera a su ubicación anterior.
+     *
+     * <p>El {@code parentId} nunca se tocó al eliminar, así que la jerarquía se reconstruye sola.
+     * Lo único que hay que resolver es el padre: si sigue en la papelera, restaurarlo también sería
+     * devolver algo que la persona no pidió, y dejar la carpeta colgando de un padre eliminado la
+     * haría invisible. Se sube hasta el primer ancestro vivo y ahí se ancla, informándolo.
+     */
+    @Override
+    @Transactional
+    public FolderEntity restoreFolder(Long folderId, Long apiKeyId, String userId, String userName) {
+        FolderEntity folder = folderRepository.findById(folderId)
+                .orElseThrow(() -> new FolderNotFoundException(folderId));
+
+        Long anchor = firstLivingAncestor(folder);
+        boolean reparented = !java.util.Objects.equals(anchor, folder.getParentId());
+        folder.setParentId(anchor);
+
+        for (FolderEntity node : collectDeletedTree(folder)) {
+            node.setDeletedAt(null);
+            node.setDeletedByUserId(null);
+            folderRepository.save(node);
+            // Los archivos vuelven con la carpeta: fueron a la papelera por arrastre, no por
+            // decisión propia, así que restaurarlos por separado sería trabajo manual inventado.
+            List<FileEntity> files = fileRepository.findAllByFolderIdAndDeletedAtIsNotNull(node.getId());
+            for (FileEntity file : files) {
+                file.setDeletedAt(null);
+            }
+            fileRepository.saveAll(files);
+        }
+
+        activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.RESTORE,
+                null, folder.getName(),
+                reparented ? "Carpeta restaurada bajo un ancestro vivo: su padre seguía en la papelera." : null,
+                folder.getId());
+        return folder;
+    }
+
+    /** Elimina definitivamente una carpeta de la papelera, con su subárbol y sus binarios. */
+    @Override
+    @Transactional
+    public void purgeFolder(Long folderId, Long apiKeyId, String userId, String userName) {
+        FolderEntity folder = folderRepository.findById(folderId)
+                .orElseThrow(() -> new FolderNotFoundException(folderId));
+
+        List<FolderEntity> tree = collectDeletedTree(folder);
+        String name = folder.getName();
+        int purged = 0;
+        for (FolderEntity node : tree) {
+            for (FileEntity file : fileRepository.findAllByFolderId(node.getId())) {
+                // El binario se borra fuera de la fila: si el objeto ya no está en el
+                // almacenamiento, la fila igual debe irse, o la papelera nunca queda limpia.
+                try {
+                    storageService.delete(file.getObjectName());
+                } catch (Exception e) {
+                    log.warn("No se pudo borrar el binario {}: {}", file.getObjectName(), e.getMessage());
+                }
+                fileRepository.delete(file);
+                purged++;
+            }
+        }
+        folderRepository.deleteAll(tree);
+
+        activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.PURGE,
+                null, name, "Carpeta eliminada definitivamente. Archivos borrados: " + purged, null);
+    }
+
+    /** Primer ancestro que no esté en la papelera, o null si hay que anclar en la raíz. */
+    private Long firstLivingAncestor(FolderEntity folder) {
+        Long current = folder.getParentId();
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        while (current != null && seen.add(current)) {
+            FolderEntity parent = folderRepository.findById(current).orElse(null);
+            if (parent == null) {
+                return null;
+            }
+            if (parent.getDeletedAt() == null) {
+                return parent.getId();
+            }
+            current = parent.getParentId();
+        }
+        return null;
+    }
+
+    /** La carpeta y todas sus descendientes eliminadas, con guarda de ciclos. */
+    private List<FolderEntity> collectDeletedTree(FolderEntity root) {
+        List<FolderEntity> tree = new ArrayList<>();
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        java.util.Deque<FolderEntity> pending = new java.util.ArrayDeque<>();
+        pending.add(root);
+        while (!pending.isEmpty()) {
+            FolderEntity node = pending.poll();
+            if (node.getId() == null || !seen.add(node.getId())) {
+                continue;
+            }
+            tree.add(node);
+            pending.addAll(folderRepository.findAllByParentIdAndDeletedAtIsNotNull(node.getId()));
+        }
+        return tree;
     }
 
     @Override
@@ -167,9 +268,9 @@ public class FolderServiceImpl implements FolderService {
                 FolderEntity parent = folderRepository.findById(parentId)
                         .orElseThrow(() -> new FolderNotFoundException(parentId));
                 Long targetApiKey = parent.getApiKeyId();
-                return folderRepository.findAllByApiKeyIdAndParentId(targetApiKey, parentId);
+                return folderRepository.findAllByApiKeyIdAndParentIdAndDeletedAtIsNull(targetApiKey, parentId);
             }
-            return folderRepository.findAllByApiKeyIdAndParentIdIsNullAndUserIdIsNull(apiKeyId);
+            return folderRepository.findAllByApiKeyIdAndParentIdIsNullAndUserIdIsNullAndDeletedAtIsNull(apiKeyId);
         }
 
         if (userId == null || userId.isBlank()) {
@@ -181,9 +282,9 @@ public class FolderServiceImpl implements FolderService {
         // keyed on the cédula alone. The parent is not validated against apiKeyId any more —
         // doing so would reject a folder this same user created from another application.
         if (parentId != null) {
-            return folderRepository.findAllByUserIdAndParentId(owner, parentId);
+            return folderRepository.findAllByUserIdAndParentIdAndDeletedAtIsNull(owner, parentId);
         }
-        return folderRepository.findAllByUserIdAndParentIdIsNull(owner);
+        return folderRepository.findAllByUserIdAndParentIdIsNullAndDeletedAtIsNull(owner);
     }
 
     @Override
@@ -193,12 +294,12 @@ public class FolderServiceImpl implements FolderService {
         }
         String query = term.trim();
         if (userId == null || userId.isBlank()) {
-            return folderRepository.findAllByApiKeyIdAndNameContainingIgnoreCase(apiKeyId, query);
+            return folderRepository.findAllByApiKeyIdAndNameContainingIgnoreCaseAndDeletedAtIsNull(apiKeyId, query);
         }
         if ("private".equalsIgnoreCase(scope)) {
-            return folderRepository.findAllByApiKeyIdAndUserIdAndNameContainingIgnoreCase(apiKeyId, userId, query);
+            return folderRepository.findAllByApiKeyIdAndUserIdAndNameContainingIgnoreCaseAndDeletedAtIsNull(apiKeyId, userId, query);
         }
-        return folderRepository.findAllByApiKeyIdAndUserIdIsNullAndNameContainingIgnoreCase(apiKeyId, query);
+        return folderRepository.findAllByApiKeyIdAndUserIdIsNullAndNameContainingIgnoreCaseAndDeletedAtIsNull(apiKeyId, query);
     }
 
     @Override
@@ -346,7 +447,7 @@ public class FolderServiceImpl implements FolderService {
         }
         fileRepository.saveAll(files);
 
-        List<FolderEntity> children = folderRepository.findAllByApiKeyIdAndParentId(apiKeyId, folder.getId());
+        List<FolderEntity> children = folderRepository.findAllByApiKeyIdAndParentIdAndDeletedAtIsNull(apiKeyId, folder.getId());
         for (FolderEntity child : children) {
             propagateUserId(child, newUserId, apiKeyId);
         }
