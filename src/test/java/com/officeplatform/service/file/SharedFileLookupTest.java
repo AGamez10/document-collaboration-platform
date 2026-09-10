@@ -59,6 +59,7 @@ class SharedFileLookupTest {
     @Mock private SharePermissionRepository shareRepository;
     @Mock private StorageService storageService;
     @Mock private FileVersionService fileVersionService;
+    @Mock private com.officeplatform.service.search.FileIndexingService fileIndexingService;
     @Mock private ActivityLogRecorder activityLogRecorder;
 
     private final List<SharePermissionEntity> grants = new ArrayList<>();
@@ -83,7 +84,7 @@ class SharedFileLookupTest {
                         .toList());
 
         service = new FileServiceImpl(fileRepository, apiKeyRepository, folderRepository,
-                shareRepository, storageService, fileVersionService, activityLogRecorder,
+                shareRepository, storageService, fileVersionService, fileIndexingService, activityLogRecorder,
                 "office-platform", "application/pdf");
     }
 

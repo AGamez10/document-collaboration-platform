@@ -33,6 +33,7 @@ import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.activity.ActivityLogRecorder;
 import com.officeplatform.service.storage.StorageService;
+import com.officeplatform.service.search.FileIndexingService;
 import com.officeplatform.service.version.FileVersionService;
 import com.officeplatform.util.DocxUtils;
 import com.officeplatform.util.FileUtils;
@@ -69,6 +70,7 @@ public class FileServiceImpl implements FileService {
     private final SharePermissionRepository sharePermissionRepository;
     private final StorageService storageService;
     private final FileVersionService fileVersionService;
+    private final FileIndexingService fileIndexingService;
     private final ActivityLogRecorder activityLogRecorder;
     private final String bucket;
     private final List<String> allowedMimeTypes;
@@ -80,6 +82,7 @@ public class FileServiceImpl implements FileService {
             SharePermissionRepository sharePermissionRepository,
             StorageService storageService,
             FileVersionService fileVersionService,
+            FileIndexingService fileIndexingService,
             ActivityLogRecorder activityLogRecorder,
             @Value("${office-platform.storage.minio.bucket}") String bucket,
             @Value("${office-platform.storage.allowed-mime-types}") String allowedMimeTypesRaw) {
@@ -89,6 +92,7 @@ public class FileServiceImpl implements FileService {
         this.sharePermissionRepository = sharePermissionRepository;
         this.storageService = storageService;
         this.fileVersionService = fileVersionService;
+        this.fileIndexingService = fileIndexingService;
         this.activityLogRecorder = activityLogRecorder;
         this.bucket = bucket;
         this.allowedMimeTypes = Arrays.asList(allowedMimeTypesRaw.split(","));
@@ -228,17 +232,15 @@ public class FileServiceImpl implements FileService {
             return List.of();
         }
         String query = term.trim();
+        // Busca por nombre Y por contenido: un procedimiento que nadie recuerda como se llama se
+        // encuentra por una frase que si recuerda haber leido adentro.
         if ("shared".equalsIgnoreCase(scope)) {
-            return fileRepository
-                    .findAllByApiKeyIdAndUserIdIsNullAndOriginalFileNameContainingIgnoreCaseAndDeletedAtIsNull(
-                            apiKeyId, query);
+            return fileRepository.searchSharedByNameOrContent(apiKeyId, query);
         }
         if (userId == null || userId.isBlank()) {
             return List.of();
         }
-        return fileRepository
-                .findAllByApiKeyIdAndUserIdAndOriginalFileNameContainingIgnoreCaseAndDeletedAtIsNull(
-                        apiKeyId, userId.trim(), query);
+        return fileRepository.searchByNameOrContentForUser(apiKeyId, userId.trim(), query);
     }
 
     @Override
@@ -306,6 +308,11 @@ public class FileServiceImpl implements FileService {
             .build();
 
         FileEntity saved = fileRepository.save(fileEntity);
+
+        // Se indexa despues de tener la fila y fuera del camino de la subida: leer un documento
+        // de varios megabytes tarda, y quien acaba de subirlo no tiene por que esperar a que se
+        // vuelva buscable para ver que su subida termino.
+        fileIndexingService.indexAsync(saved.getId());
         activityLogRecorder.record(apiKeyId, userId, effectiveUserName, ActivityAction.UPLOAD,
                 saved.getId(), saved.getOriginalFileName(), null, saved.getFolderId());
         return saved;

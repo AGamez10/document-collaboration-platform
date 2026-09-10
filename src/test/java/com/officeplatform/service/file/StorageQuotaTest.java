@@ -56,6 +56,7 @@ class StorageQuotaTest {
     @Mock private SharePermissionRepository sharePermissionRepository;
     @Mock private StorageService storageService;
     @Mock private FileVersionService fileVersionService;
+    @Mock private com.officeplatform.service.search.FileIndexingService fileIndexingService;
     @Mock private ActivityLogRecorder activityLogRecorder;
 
     private FileServiceImpl service;
@@ -75,7 +76,7 @@ class StorageQuotaTest {
         });
 
         service = new FileServiceImpl(fileRepository, apiKeyRepository, folderRepository,
-                sharePermissionRepository, storageService, fileVersionService, activityLogRecorder,
+                sharePermissionRepository, storageService, fileVersionService, fileIndexingService, activityLogRecorder,
                 "office-platform",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     }

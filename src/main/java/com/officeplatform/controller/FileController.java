@@ -104,9 +104,18 @@ public class FileController {
             @RequestParam("q") String q,
             @RequestParam(required = false) String scope,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
+        // La marca se calcula acá y no en el servicio: la busqueda devuelve entidades, y decidir
+        // si el nombre coincide es una cuestion de presentacion, no de dominio.
+        String term = q == null ? "" : q.trim().toLowerCase(java.util.Locale.ROOT);
         List<FileResponse> files = fileService
                 .searchFiles(principal.getApiKeyId(), q, principal.resolveUserId(null), scope).stream()
-                .map(this::toFileResponse)
+                .map(entity -> {
+                    FileResponse dto = toFileResponse(entity);
+                    boolean porNombre = entity.getOriginalFileName() != null
+                            && entity.getOriginalFileName().toLowerCase(java.util.Locale.ROOT).contains(term);
+                    dto.setMatchedByContent(!porNombre);
+                    return dto;
+                })
                 .toList();
 
         ApiResponse<List<FileResponse>> response = ApiResponse.<List<FileResponse>>builder()
@@ -688,6 +697,9 @@ public class FileController {
                 fileEntity.getCreatedByName(),
                 fileEntity.getCreatedByUserId(),
                 fileEntity.getUpdatedByName(),
+                // matchedByContent y restricted: ambos son marcas de presentacion que el
+                // endpoint correspondiente sobreescribe cuando aplica.
+                false,
                 false);
     }
 

@@ -154,4 +154,29 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     /** Todos los archivos de una carpeta, vivos o en papelera, para purgar el arbol. */
     List<FileEntity> findAllByFolderId(Long folderId);
 
+
+    // ── Busqueda por nombre o por contenido ─────────────────────────────────
+    // Se consultan las dos columnas en una sola pasada. Hacerlo en dos consultas y unir en
+    // memoria obligaria a deduplicar los archivos que coinciden por ambas.
+
+    @Query("select f from FileEntity f where f.apiKeyId = :apiKeyId and f.deletedAt is null "
+         + "and (lower(f.originalFileName) like lower(concat('%', :term, '%')) "
+         + "  or lower(f.searchContent) like lower(concat('%', :term, '%')))")
+    List<FileEntity> searchByNameOrContent(@Param("apiKeyId") Long apiKeyId, @Param("term") String term);
+
+    @Query("select f from FileEntity f where f.apiKeyId = :apiKeyId and f.userId = :userId "
+         + "and f.deletedAt is null "
+         + "and (lower(f.originalFileName) like lower(concat('%', :term, '%')) "
+         + "  or lower(f.searchContent) like lower(concat('%', :term, '%')))")
+    List<FileEntity> searchByNameOrContentForUser(@Param("apiKeyId") Long apiKeyId,
+                                                  @Param("userId") String userId,
+                                                  @Param("term") String term);
+
+    @Query("select f from FileEntity f where f.apiKeyId = :apiKeyId and f.userId is null "
+         + "and f.deletedAt is null "
+         + "and (lower(f.originalFileName) like lower(concat('%', :term, '%')) "
+         + "  or lower(f.searchContent) like lower(concat('%', :term, '%')))")
+    List<FileEntity> searchSharedByNameOrContent(@Param("apiKeyId") Long apiKeyId,
+                                                 @Param("term") String term);
+
 }

@@ -62,6 +62,7 @@ public class EditorServiceImpl implements EditorService {
     private final RestTemplate restTemplate;
     private final ShareService shareService;
     private final FileVersionService fileVersionService;
+    private final com.officeplatform.service.search.FileIndexingService fileIndexingService;
     private final com.officeplatform.service.notification.NotificationService notificationService;
     private final com.officeplatform.repository.SharePermissionRepository sharePermissionRepository;
     private final com.officeplatform.repository.KnownUserRepository knownUserRepository;
@@ -80,6 +81,7 @@ public class EditorServiceImpl implements EditorService {
             RestTemplate restTemplate,
             ShareService shareService,
             FileVersionService fileVersionService,
+            com.officeplatform.service.search.FileIndexingService fileIndexingService,
             com.officeplatform.service.notification.NotificationService notificationService,
             com.officeplatform.repository.SharePermissionRepository sharePermissionRepository,
             com.officeplatform.repository.KnownUserRepository knownUserRepository,
@@ -96,6 +98,7 @@ public class EditorServiceImpl implements EditorService {
         this.restTemplate = restTemplate;
         this.shareService = shareService;
         this.fileVersionService = fileVersionService;
+        this.fileIndexingService = fileIndexingService;
         this.notificationService = notificationService;
         this.sharePermissionRepository = sharePermissionRepository;
         this.knownUserRepository = knownUserRepository;
@@ -265,6 +268,10 @@ public class EditorServiceImpl implements EditorService {
             fileEntity.setUpdatedByName(updatedByName);
         }
         fileRepository.save(fileEntity);
+
+        // El contenido cambio, asi que el texto indexado quedo viejo: buscar por una frase que
+        // alguien acaba de borrar seguiria encontrando el documento.
+        fileIndexingService.indexAsync(fileEntity.getId());
 
         String userId = editorUserId;
         activityLogRecorder.record(fileEntity.getApiKeyId(), userId, updatedByName, ActivityAction.EDITOR_SAVE,

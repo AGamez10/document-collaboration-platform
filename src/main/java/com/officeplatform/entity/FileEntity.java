@@ -86,6 +86,16 @@ public class FileEntity {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
+    /**
+     * Texto extraido del documento, para poder buscarlo por su contenido.
+     *
+     * <p>Anulable y sin indexar al vuelo: los archivos anteriores a esta columna lo tienen en null
+     * y se siguen encontrando por nombre. El extractor lo llena de forma asincrona despues de cada
+     * subida o guardado, porque leer un .docx no puede demorar la respuesta de la subida.
+     */
+    @Column(name = "search_content", columnDefinition = "TEXT")
+    private String searchContent;
+
     @PrePersist
     protected void onCreate() {
         LocalDateTime now = LocalDateTime.now();
