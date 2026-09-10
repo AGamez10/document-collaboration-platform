@@ -39,6 +39,15 @@ public class ApiKeyEntity {
     @Column(name = "active", nullable = false)
     private Boolean active;
 
+    /**
+     * Tope de almacenamiento del proyecto, en bytes. Null significa sin limite.
+     *
+     * <p>Anulable a proposito: los proyectos que ya existen trabajan sin tope, y un valor por
+     * defecto les habria impuesto uno retroactivo cuyo primer sintoma seria gente sin poder subir.
+     */
+    @Column(name = "storage_quota_bytes")
+    private Long storageQuotaBytes;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

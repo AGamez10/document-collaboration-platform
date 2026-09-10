@@ -29,6 +29,7 @@ import jakarta.validation.Valid;
 
 import com.officeplatform.dto.request.BackupConfigRequest;
 import com.officeplatform.dto.request.CreateApiKeyRequest;
+import com.officeplatform.dto.request.UpdateQuotaRequest;
 import com.officeplatform.dto.request.UpdateApiKeyStatusRequest;
 import com.officeplatform.dto.request.UpdateUserRoleRequest;
 import com.officeplatform.dto.response.ActivityLogResponse;
@@ -44,6 +45,7 @@ import com.officeplatform.dto.response.EditorSessionResponse;
 import com.officeplatform.dto.response.KnownUserResponse;
 import com.officeplatform.dto.response.OnlyOfficeStatusResponse;
 import com.officeplatform.dto.response.PagedResponse;
+import com.officeplatform.dto.response.ProjectStorageResponse;
 import com.officeplatform.service.admin.AdminService;
 
 @RestController
@@ -122,6 +124,47 @@ public class AdminController {
         ApiResponse<Void> response = ApiResponse.<Void>builder()
                 .success(true)
                 .message("API key eliminada permanentemente")
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    // ── Cuotas de almacenamiento ────────────────────────────────────────────
+
+    /** Consumo y tope de cada proyecto, ordenado por lo que mas ocupa. */
+    @GetMapping("/storage/summary")
+    public ResponseEntity<ApiResponse<List<ProjectStorageResponse>>> storageSummary() {
+        List<ProjectStorageResponse> data = adminService.getStorageSummary();
+
+        ApiResponse<List<ProjectStorageResponse>> response = ApiResponse.<List<ProjectStorageResponse>>builder()
+                .success(true)
+                .message("Consumo de almacenamiento por proyecto")
+                .data(data)
+                .build();
+
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Asigna o quita el tope de un proyecto.
+     *
+     * <p>Se recibe en gigabytes porque es la unidad en la que piensa un administrador. Enviar
+     * {@code quotaGb} nulo deja el proyecto sin limite, que es como funcionan los que nadie
+     * configuro; cero seria bloquearlo entero y no es lo que nadie quiere decir.
+     */
+    @PatchMapping("/projects/{id}/quota")
+    public ResponseEntity<ApiResponse<ProjectStorageResponse>> updateQuota(
+            @PathVariable Long id,
+            @Valid @RequestBody UpdateQuotaRequest request) {
+
+        ProjectStorageResponse data = adminService.updateQuota(id, request.getQuotaGb());
+
+        ApiResponse<ProjectStorageResponse> response = ApiResponse.<ProjectStorageResponse>builder()
+                .success(true)
+                .message(request.getQuotaGb() == null
+                        ? "Proyecto sin limite de almacenamiento"
+                        : "Cuota actualizada a " + data.getFormattedQuota())
+                .data(data)
                 .build();
 
         return ResponseEntity.ok(response);

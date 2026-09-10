@@ -6,6 +6,7 @@ import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import com.officeplatform.entity.FileEntity;
@@ -126,10 +127,25 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     @Query("select coalesce(sum(f.size), 0) from FileEntity f where f.deletedAt is null")
     long sumSizeOfActiveFiles();
 
+    /**
+     * Bytes que ocupa un proyecto, contando solo lo vivo.
+     *
+     * <p>La papelera no suma: un archivo eliminado ya no le sirve a nadie y cobrarlo contra la
+     * cuota dejaria a la gente sin poder subir hasta que alguien vacie la papelera, que es un
+     * castigo raro por haber borrado algo. coalesce cubre el proyecto sin archivos, donde sum()
+     * devuelve null en vez de cero.
+     */
+    @Query("select coalesce(sum(f.size), 0) from FileEntity f "
+         + "where f.apiKeyId = :apiKeyId and f.deletedAt is null")
+    long sumSizeByApiKeyIdAndDeletedAtIsNull(@Param("apiKeyId") Long apiKeyId);
+
     /** Per-API-key file count + storage usage, active files only. Row shape: [apiKeyId, fileCount, totalSize]. */
     @Query("select f.apiKeyId, count(f), coalesce(sum(f.size), 0) "
             + "from FileEntity f where f.deletedAt is null group by f.apiKeyId")
     List<Object[]> countAndSizeByApiKeyGrouped();
+
+    /** Cuantos archivos vivos tiene un proyecto. */
+    long countByApiKeyIdAndDeletedAtIsNull(Long apiKeyId);
 
 
     /** Archivos de una carpeta que estan en la papelera, para restaurarlos con ella. */

@@ -32,6 +32,12 @@ public interface AdminService {
 
     void deleteApiKey(Long id);
 
+    /** Consumo y tope de cada proyecto, con su estado de saturacion. */
+    java.util.List<com.officeplatform.dto.response.ProjectStorageResponse> getStorageSummary();
+
+    /** Asigna o quita el tope de un proyecto. Gigabytes null deja el proyecto sin limite. */
+    com.officeplatform.dto.response.ProjectStorageResponse updateQuota(Long apiKeyId, Double quotaGb);
+
     PagedResponse<ActivityLogResponse> getActivityLog(
             Pageable pageable, LocalDate dateFrom, LocalDate dateTo, Long apiKeyId, String action, String userId,
             Long folderId);

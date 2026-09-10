@@ -107,6 +107,32 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(response);
     }
 
+    /**
+     * Cuota agotada: 413 y no 500.
+     *
+     * <p>El servidor funciona perfectamente; lo que no entra es el archivo. Un 500 invitaria a
+     * reintentar indefinidamente algo que nunca va a pasar hasta que un administrador amplie el
+     * tope, y ocultaria una decision administrativa detras de un error tecnico.
+     */
+    @ExceptionHandler(StorageQuotaExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleStorageQuotaExceeded(
+            StorageQuotaExceededException ex, HttpServletRequest request) {
+
+        ErrorResponse error = ErrorResponse.builder()
+            .code("STORAGE_QUOTA_EXCEEDED")
+            .details(ex.getMessage())
+            .path(request.getRequestURI())
+            .timestamp(System.currentTimeMillis() / 1000)
+            .build();
+
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(
+            ApiResponse.<Void>builder()
+                .success(false)
+                .message(ex.getMessage())
+                .metadata(java.util.Map.of("error", error))
+                .build());
+    }
+
     @ExceptionHandler(StorageException.class)
     public ResponseEntity<ApiResponse<Void>> handleStorageException(
             StorageException ex, HttpServletRequest request) {

@@ -20,11 +20,14 @@ import com.officeplatform.dto.request.UploadFileRequest;
 import com.officeplatform.entity.ActivityAction;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
+import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.SharePermissionEntity;
 import com.officeplatform.exception.FileNotFoundException;
 import com.officeplatform.exception.FolderNotFoundException;
 import com.officeplatform.exception.StorageException;
+import com.officeplatform.exception.StorageQuotaExceededException;
 import com.officeplatform.exception.UnsupportedFileTypeException;
+import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.SharePermissionRepository;
@@ -61,6 +64,7 @@ public class FileServiceImpl implements FileService {
     private static final int MAX_FILE_NAME_LENGTH = 255;
 
     private final FileRepository fileRepository;
+    private final ApiKeyRepository apiKeyRepository;
     private final FolderRepository folderRepository;
     private final SharePermissionRepository sharePermissionRepository;
     private final StorageService storageService;
@@ -71,6 +75,7 @@ public class FileServiceImpl implements FileService {
 
     public FileServiceImpl(
             FileRepository fileRepository,
+            ApiKeyRepository apiKeyRepository,
             FolderRepository folderRepository,
             SharePermissionRepository sharePermissionRepository,
             StorageService storageService,
@@ -79,6 +84,7 @@ public class FileServiceImpl implements FileService {
             @Value("${office-platform.storage.minio.bucket}") String bucket,
             @Value("${office-platform.storage.allowed-mime-types}") String allowedMimeTypesRaw) {
         this.fileRepository = fileRepository;
+        this.apiKeyRepository = apiKeyRepository;
         this.folderRepository = folderRepository;
         this.sharePermissionRepository = sharePermissionRepository;
         this.storageService = storageService;
@@ -86,6 +92,34 @@ public class FileServiceImpl implements FileService {
         this.activityLogRecorder = activityLogRecorder;
         this.bucket = bucket;
         this.allowedMimeTypes = Arrays.asList(allowedMimeTypesRaw.split(","));
+    }
+
+    /**
+     * Corta la subida si el proyecto ya no tiene espacio.
+     *
+     * <p>Un proyecto sin cuota configurada no tiene tope, que es como funcionaron todos hasta
+     * ahora. Se mide contra lo que esta vivo: la papelera no cuenta, porque cobrar bytes que
+     * alguien ya decidio borrar dejaria a la gente sin poder subir hasta que otro vacie la
+     * papelera, un castigo raro por haber ordenado.
+     *
+     * <p>Se valida ANTES de escribir en el almacenamiento. Al reves, un archivo rechazado dejaria
+     * su binario huerfano en MinIO ocupando la cuota que se acaba de negar.
+     */
+    private void assertQuotaAllows(Long apiKeyId, long incomingSize) {
+        Long quota = apiKeyRepository.findById(apiKeyId)
+                .map(ApiKeyEntity::getStorageQuotaBytes)
+                .orElse(null);
+        if (quota == null || quota <= 0) {
+            return;
+        }
+        long used = fileRepository.sumSizeByApiKeyIdAndDeletedAtIsNull(apiKeyId);
+        if (used + incomingSize > quota) {
+            throw new StorageQuotaExceededException(
+                    "Cuota de almacenamiento excedida para este proyecto. Contacte al administrador. "
+                            + "Usado: " + FileUtils.formatBytes(used)
+                            + " de " + FileUtils.formatBytes(quota)
+                            + "; este archivo pesa " + FileUtils.formatBytes(incomingSize) + ".");
+        }
     }
 
     private String resolveEffectiveUserId(String userId, Long apiKeyId) {
@@ -224,6 +258,8 @@ public class FileServiceImpl implements FileService {
             throw new UnsupportedFileTypeException(
                     "La extensión del archivo no corresponde al tipo declarado (" + contentType + ")");
         }
+
+        assertQuotaAllows(apiKeyId, file.getSize());
 
         String uuid = UUID.randomUUID().toString();
         String extension = FileUtils.extractExtension(request.getOriginalFileName());

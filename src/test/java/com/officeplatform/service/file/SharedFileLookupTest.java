@@ -26,6 +26,7 @@ import com.officeplatform.entity.SharePermissionEntity.PermissionLevel;
 import com.officeplatform.entity.SharePermissionEntity.ResourceType;
 import com.officeplatform.entity.SharePermissionEntity.TargetType;
 import com.officeplatform.exception.FileNotFoundException;
+import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.SharePermissionRepository;
@@ -53,6 +54,7 @@ class SharedFileLookupTest {
     private static final String ME = "111";
 
     @Mock private FileRepository fileRepository;
+    @Mock private ApiKeyRepository apiKeyRepository;
     @Mock private FolderRepository folderRepository;
     @Mock private SharePermissionRepository shareRepository;
     @Mock private StorageService storageService;
@@ -80,8 +82,8 @@ class SharedFileLookupTest {
                         .filter(g -> i.getArgument(3).equals(g.getTargetUserId()))
                         .toList());
 
-        service = new FileServiceImpl(fileRepository, folderRepository, shareRepository,
-                storageService, fileVersionService, activityLogRecorder,
+        service = new FileServiceImpl(fileRepository, apiKeyRepository, folderRepository,
+                shareRepository, storageService, fileVersionService, activityLogRecorder,
                 "office-platform", "application/pdf");
     }
 

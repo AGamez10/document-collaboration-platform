@@ -212,6 +212,78 @@ public class AdminServiceImpl implements AdminService {
         return toApiKeyResponse(saved);
     }
 
+    private static final long BYTES_PER_GB = 1024L * 1024L * 1024L;
+    private static final double QUOTA_WARNING_PERCENT = 85.0;
+    private static final double QUOTA_CRITICAL_PERCENT = 95.0;
+
+    /**
+     * Consumo de cada proyecto contra su tope.
+     *
+     * <p>Los totales se piden agrupados en una sola consulta en lugar de una por proyecto: con
+     * cuarenta api keys, la version ingenua son cuarenta consultas para pintar una tabla.
+     */
+    @Override
+    public java.util.List<com.officeplatform.dto.response.ProjectStorageResponse> getStorageSummary() {
+        Map<Long, long[]> porProyecto = new HashMap<>();
+        for (Object[] row : fileRepository.countAndSizeByApiKeyGrouped()) {
+            porProyecto.put((Long) row[0], new long[] { (Long) row[1], (Long) row[2] });
+        }
+
+        java.util.List<com.officeplatform.dto.response.ProjectStorageResponse> out = new ArrayList<>();
+        for (ApiKeyEntity key : apiKeyRepository.findAll()) {
+            long[] datos = porProyecto.getOrDefault(key.getId(), new long[] { 0L, 0L });
+            out.add(buildStorageResponse(key, datos[1], datos[0]));
+        }
+        out.sort(Comparator.comparingLong(
+                com.officeplatform.dto.response.ProjectStorageResponse::getUsedBytes).reversed());
+        return out;
+    }
+
+    @Override
+    @Transactional
+    public com.officeplatform.dto.response.ProjectStorageResponse updateQuota(Long apiKeyId, Double quotaGb) {
+        ApiKeyEntity key = apiKeyRepository.findById(apiKeyId)
+                .orElseThrow(() -> new ApiKeyNotFoundException(apiKeyId));
+
+        // Null quita el limite en vez de fijar cero: una cuota de cero bytes bloquearia el
+        // proyecto entero, que no es lo que nadie quiere decir al dejar el campo vacio.
+        Long antes = key.getStorageQuotaBytes();
+        key.setStorageQuotaBytes(quotaGb == null ? null : Math.round(quotaGb * BYTES_PER_GB));
+        apiKeyRepository.save(key);
+
+        log.info("Cuota del proyecto {} actualizada de {} a {}", key.getName(),
+                antes == null ? "sin limite" : com.officeplatform.util.FileUtils.formatBytes(antes),
+                key.getStorageQuotaBytes() == null ? "sin limite"
+                        : com.officeplatform.util.FileUtils.formatBytes(key.getStorageQuotaBytes()));
+
+        return buildStorageResponse(key,
+                fileRepository.sumSizeByApiKeyIdAndDeletedAtIsNull(apiKeyId),
+                fileRepository.countByApiKeyIdAndDeletedAtIsNull(apiKeyId));
+    }
+
+    private com.officeplatform.dto.response.ProjectStorageResponse buildStorageResponse(
+            ApiKeyEntity key, long usedBytes, long fileCount) {
+        Long quota = key.getStorageQuotaBytes();
+        Double percent = null;
+        String status = "UNLIMITED";
+        if (quota != null && quota > 0) {
+            percent = Math.round((usedBytes * 10000.0) / quota) / 100.0;
+            status = percent > QUOTA_CRITICAL_PERCENT ? "CRITICAL"
+                    : percent > QUOTA_WARNING_PERCENT ? "WARNING" : "NORMAL";
+        }
+        return com.officeplatform.dto.response.ProjectStorageResponse.builder()
+                .apiKeyId(key.getId())
+                .projectName(key.getName())
+                .usedBytes(usedBytes)
+                .formattedUsed(com.officeplatform.util.FileUtils.formatBytes(usedBytes))
+                .quotaBytes(quota)
+                .formattedQuota(quota == null ? "Sin limite" : com.officeplatform.util.FileUtils.formatBytes(quota))
+                .usagePercent(percent)
+                .status(status)
+                .fileCount(fileCount)
+                .build();
+    }
+
     @Override
     @Transactional
     public void deleteApiKey(Long id) {

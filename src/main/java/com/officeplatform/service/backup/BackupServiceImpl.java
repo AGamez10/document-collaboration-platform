@@ -720,13 +720,9 @@ public class BackupServiceImpl implements BackupService {
         return null; // El frontend lo manejará limpiamente
     }
 
+    /** Delega en la utilidad compartida: dos copias del mismo redondeo terminan divergiendo. */
     private String formatBytes(long bytes) {
-        if (bytes <= 0) return "0 B";
-        final String[] units = new String[] { "B", "KB", "MB", "GB", "TB" };
-        int digitGroups = (int) (Math.log10(bytes) / Math.log10(1024));
-        digitGroups = Math.min(digitGroups, units.length - 1);
-        double size = bytes / Math.pow(1024, digitGroups);
-        return String.format("%.2f %s", size, units[digitGroups]);
+        return com.officeplatform.util.FileUtils.formatBytes(bytes);
     }
 
 
