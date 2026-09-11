@@ -30,6 +30,7 @@ import com.officeplatform.service.file.FileService;
 import com.officeplatform.service.storage.StorageService;
 import com.officeplatform.service.version.FileVersionService;
 import com.officeplatform.util.DateUtils;
+import com.officeplatform.util.FileUtils;
 import com.officeplatform.util.UrlUtils;
 
 import com.officeplatform.service.share.ShareService;
@@ -150,8 +151,13 @@ public class EditorServiceImpl implements EditorService {
         );
 
         String documentKey = buildDocumentKey(fileEntity);
+        // La extension decide con que motor abre OnlyOffice el documento. Una fila sin ella hace
+        // que resolveDocumentType caiga en su rama por defecto y se le entregue un libro de Excel
+        // al conversor de Word, que falla sin explicar nada al usuario. El nombre original siempre
+        // la tiene, asi que se usa como respaldo en lugar de confiar en la columna.
+        String resolvedExtension = resolveExtension(fileEntity);
         OnlyOfficeDocument document = new OnlyOfficeDocument(
-                fileEntity.getExtension(),
+                resolvedExtension,
                 documentKey,
                 fileEntity.getOriginalFileName(),
                 documentUrl,
@@ -175,7 +181,7 @@ public class EditorServiceImpl implements EditorService {
                 .comments(true)
                 .build());
 
-        OnlyOfficeConfig config = new OnlyOfficeConfig(document, resolveDocumentType(fileEntity.getExtension()), editorConfig, null);
+        OnlyOfficeConfig config = new OnlyOfficeConfig(document, resolveDocumentType(resolvedExtension), editorConfig, null);
         String token = onlyOfficeService.signConfig(config);
         config.setToken(token);
 
@@ -353,7 +359,23 @@ public class EditorServiceImpl implements EditorService {
         return key.substring(firstUnderscore + 1, lastUnderscore);
     }
 
-    private String resolveDocumentType(String extension) {
+    /**
+     * Extension del archivo, tomada de la columna o deducida de su nombre.
+     *
+     * <p>La columna puede venir vacia en filas antiguas o restauradas desde un respaldo que no la
+     * traia. El nombre original si la tiene, y de el se deduce sin costo.
+     */
+    static String resolveExtension(FileEntity fileEntity) {
+        String extension = fileEntity.getExtension();
+        if (extension != null && !extension.isBlank()) {
+            return extension.trim().toLowerCase(java.util.Locale.ROOT);
+        }
+        String fromName = FileUtils.extractExtension(fileEntity.getOriginalFileName());
+        return (fromName == null || fromName.isBlank())
+                ? null : fromName.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    static String resolveDocumentType(String extension) {
         if (extension == null) {
             return "word";
         }

@@ -1849,7 +1849,7 @@
   }
 
   async function listTrashedWithMe() {
-    const res = await apiFetch('/api/share/trashed-with-me');
+    const res = await apiFetch('/api/trashed-with-me');
     const j = await res.json();
     return j.data || [];
   }
@@ -2039,9 +2039,16 @@
     });
   }
 
-  function resolveDocType(fileType) {
-    if (!fileType) return 'word';
-    const t = fileType.toLowerCase();
+  function resolveDocType(fileType, fileName) {
+    // Sin fileType se deduce del nombre antes de caer en el valor por defecto: entregar un libro
+    // de Excel al motor de Word lo deja sin abrir, y "word" es un default que acierta solo para
+    // documentos de texto.
+    let raw = fileType;
+    if (!raw && fileName) {
+      raw = extensionOf(fileName);
+    }
+    if (!raw) return 'word';
+    const t = String(raw).toLowerCase();
     // Debe coincidir con resolveDocumentType de EditorServiceImpl: el backend firma el config
     // con su propio valor y el Document Server rechaza el documento si los dos no concuerdan.
     if (['xlsx', 'xls', 'xlsm', 'xltm', 'xlsb', 'ods', 'csv'].indexOf(t) >= 0) return 'cell';
@@ -2727,7 +2734,7 @@
           // the OnlyOffice Document Server container, not from the browser's URL.
           _docsAPI = new window.DocsAPI.DocEditor('op-editor-container', {
             document: cfg.document,
-            documentType: resolveDocType(cfg.document && cfg.document.fileType),
+            documentType: resolveDocType(cfg.document && cfg.document.fileType, fileName),
             token: cfg.token,
             editorConfig: cfg.editorConfig,
             events: {
@@ -2751,9 +2758,23 @@
                 }
               },
               onError: function (event) {
-                if (statusEl) { statusEl.textContent = 'Error al guardar'; statusEl.setAttribute('data-state', 'error'); }
+                // El spinner se quita primero. Sin esto la pantalla quedaba congelada en
+                // "Cargando editor…" para siempre, y el error solo se veia en un toast que
+                // desaparece: la persona se quedaba mirando una carga que nunca iba a terminar.
+                if (loading) loading.remove();
+
+                // El mensaje distingue las dos situaciones. Decir "Error al guardar" mientras el
+                // documento todavia se estaba abriendo hace pensar que se perdio trabajo que
+                // nunca existio, y manda a la persona a buscar un problema que no esta ahi.
+                const duranteCarga = !_editorDirty;
+                if (statusEl) {
+                  statusEl.textContent = duranteCarga ? 'Error al cargar' : 'Error al guardar';
+                  statusEl.setAttribute('data-state', 'error');
+                }
                 const detail = event && event.data ? (event.data.errorDescription || String(event.data)) : 'Error del editor';
-                toast('Error del editor: ' + detail, 'error');
+                toast(duranteCarga
+                  ? 'No se pudo abrir el documento: ' + detail
+                  : 'Error al guardar: ' + detail, 'error');
               },
             },
           });

@@ -94,7 +94,12 @@ public class ShareController {
      * archivos que el autor eliminó del proyecto, y ésta, vínculos que el destinatario ocultó sin
      * tocar el original. El gestor las muestra juntas, pero restaurar cada una hace algo distinto.
      */
-    @GetMapping("/trashed-with-me")
+    // Se mapean las dos rutas. La real siempre fue /api/trashed-with-me, porque este controlador
+    // cuelga de /api y no de /api/share, pero el widget la pedia bajo /api/share: Spring la
+    // asociaba por prefijo con el DELETE /share/{permissionId} y respondia "metodo no soportado".
+    // allSettled se tragaba el fallo y la papelera se pintaba vacia sin que nada dijera por que.
+    // Aceptar ambas evita romper a cualquier consumidor que ya haya escrito una u otra.
+    @GetMapping({"/trashed-with-me", "/share/trashed-with-me"})
     public ResponseEntity<ApiResponse<List<SharedResourceResponse>>> trashedWithMe(
             @RequestParam(required = false) String userId,
             @AuthenticationPrincipal ApiKeyPrincipal principal) {
