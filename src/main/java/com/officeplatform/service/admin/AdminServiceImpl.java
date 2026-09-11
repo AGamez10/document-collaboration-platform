@@ -86,6 +86,7 @@ public class AdminServiceImpl implements AdminService {
     private final KnownUserRepository knownUserRepository;
     private final ActivityLogRecorder activityLogRecorder;
     private final BackupService backupService;
+    private final com.officeplatform.service.search.FileIndexingService fileIndexingService;
     private final int onlyOfficeMaxConnections;
     private final long storageLimit;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -102,6 +103,7 @@ public class AdminServiceImpl implements AdminService {
             KnownUserRepository knownUserRepository,
             ActivityLogRecorder activityLogRecorder,
             BackupService backupService,
+            com.officeplatform.service.search.FileIndexingService fileIndexingService,
             @Value("${office-platform.onlyoffice.max-connections}") int onlyOfficeMaxConnections,
             @Value("${office-platform.storage.max-total-size}") long storageLimit) {
         this.fileRepository = fileRepository;
@@ -115,6 +117,7 @@ public class AdminServiceImpl implements AdminService {
         this.knownUserRepository = knownUserRepository;
         this.activityLogRecorder = activityLogRecorder;
         this.backupService = backupService;
+        this.fileIndexingService = fileIndexingService;
         this.onlyOfficeMaxConnections = onlyOfficeMaxConnections;
         this.storageLimit = storageLimit;
     }
@@ -210,6 +213,24 @@ public class AdminServiceImpl implements AdminService {
         entity.setActive(active);
         ApiKeyEntity saved = apiKeyRepository.save(entity);
         return toApiKeyResponse(saved);
+    }
+
+    /**
+     * Encola el indexado de lo que quedo sin texto.
+     *
+     * <p>Devuelve de inmediato con la cuenta de encolados en lugar de esperar a terminar: sobre
+     * cientos de archivos el trabajo lleva minutos, y una peticion HTTP colgada ese tiempo se corta
+     * sola dejando al administrador sin saber si el reindexado siguio o no.
+     */
+    @Override
+    public int reindexPendingFiles() {
+        java.util.List<Long> pendientes = fileRepository.findIdsPendingIndexing();
+        if (pendientes.isEmpty()) {
+            return 0;
+        }
+        log.info("Reindexado historico: {} archivos encolados", pendientes.size());
+        fileIndexingService.reindexPendingAsync(pendientes);
+        return pendientes.size();
     }
 
     private static final long BYTES_PER_GB = 1024L * 1024L * 1024L;

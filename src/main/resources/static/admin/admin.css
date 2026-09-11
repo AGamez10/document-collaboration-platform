@@ -961,3 +961,18 @@ body.not-authenticated .op-app {
   #op-key-modal-result { max-height: calc(94vh - 110px); }
   .op-code-block { max-height: 150px; font-size: 11px; }
 }
+
+
+/* ── Barra de uso de almacenamiento ────────────────────────────────────────
+   El color lo decide el estado que calcula el servidor, no un umbral repetido
+   acá: dos copias del mismo límite se desincronizan en cuanto alguien mueve una. */
+.op-bar {
+  display: inline-block; vertical-align: middle;
+  width: 110px; height: 7px; border-radius: 999px;
+  background: var(--admin-border, #e2e8f0);
+  overflow: hidden; margin-right: 8px;
+}
+.op-bar__fill { height: 100%; border-radius: 999px; transition: width .3s ease; }
+.op-bar--normal   { background: #16a34a; }
+.op-bar--warning  { background: #d97706; }
+.op-bar--critical { background: #dc2626; }

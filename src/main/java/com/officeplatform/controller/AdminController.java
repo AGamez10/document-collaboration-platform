@@ -129,6 +129,29 @@ public class AdminController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Indexa el contenido de los archivos historicos.
+     *
+     * <p>Los que existian antes de la busqueda por contenido tienen la columna en null y hoy solo
+     * se encuentran por su nombre. Responde de inmediato con cuantos quedaron encolados: el
+     * trabajo real corre en segundo plano, porque sobre cientos de archivos lleva minutos y una
+     * peticion colgada ese tiempo se corta sola.
+     */
+    @PostMapping("/files/reindex")
+    public ResponseEntity<ApiResponse<Integer>> reindexFiles() {
+        int encolados = adminService.reindexPendingFiles();
+
+        ApiResponse<Integer> response = ApiResponse.<Integer>builder()
+                .success(true)
+                .message(encolados == 0
+                        ? "No hay archivos pendientes de indexar."
+                        : encolados + " archivo(s) encolados para indexar. El proceso sigue en segundo plano.")
+                .data(encolados)
+                .build();
+
+        return ResponseEntity.accepted().body(response);
+    }
+
     // ── Cuotas de almacenamiento ────────────────────────────────────────────
 
     /** Consumo y tope de cada proyecto, ordenado por lo que mas ocupa. */

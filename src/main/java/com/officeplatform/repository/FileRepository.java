@@ -179,4 +179,15 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     List<FileEntity> searchSharedByNameOrContent(@Param("apiKeyId") Long apiKeyId,
                                                  @Param("term") String term);
 
+
+    /**
+     * Ids de los archivos vivos que todavia no tienen texto extraido.
+     *
+     * <p>Devuelve solo ids y no entidades: el reindexado puede abarcar miles de filas, y traerlas
+     * enteras para quedarse con su identificador cargaria en memoria el catalogo completo. Cada
+     * archivo se vuelve a leer despues, uno por uno, cuando le toca.
+     */
+    @Query("select f.id from FileEntity f where f.searchContent is null and f.deletedAt is null")
+    List<Long> findIdsPendingIndexing();
+
 }

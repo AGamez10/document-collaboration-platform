@@ -294,6 +294,7 @@
     dashboard: { title: 'Dashboard General', subtitle: 'Monitoreo en tiempo real, almacenamiento y sesiones activas' },
     files: { title: 'Archivos & Papelera de Reciclaje', subtitle: 'Gestión integral de archivos, restauración y purga física' },
     backups: { title: 'Copias de Seguridad (Backups)', subtitle: 'Respaldo físico en disco local, compresión ZIP y programador' },
+    storage: { title: 'Almacenamiento & Cuotas', subtitle: 'Consumo por proyecto, topes asignados e indexación de contenido' },
     users: { title: 'Usuarios & Aplicaciones Consumidoras', subtitle: 'Directorio de usuarios por proyecto y asignación de roles' },
     'api-keys': { title: 'API Keys de Integración', subtitle: 'Gestión de credenciales para aplicativos backend y snippets' },
     activity: { title: 'Trazabilidad & Auditoría', subtitle: 'Registro detallado de acciones, documentos y direcciones IP' },
@@ -333,6 +334,8 @@
       loadFiles();
     } else if (view === 'backups') {
       loadBackups();
+    } else if (view === 'storage') {
+      loadStorage();
     } else if (view === 'users') {
       loadUsers();
     } else if (view === 'api-keys') {
@@ -808,6 +811,99 @@
     }
   }
 
+  /**
+   * Consumo de cada proyecto contra su tope.
+   *
+   * <p>El estado y el porcentaje los calcula el servidor. Duplicar los umbrales acá haría que
+   * moverlos en un lado deje al otro mintiendo, y la tabla diría "NORMAL" sobre un proyecto que
+   * el backend ya considera crítico.
+   */
+  async function loadStorage() {
+    const tbody = document.getElementById('op-storage-tbody');
+    const empty = document.getElementById('op-storage-empty');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="6">Cargando…</td></tr>';
+
+    try {
+      const res = await api('/api/admin/storage/summary');
+      const proyectos = res.data || [];
+      if (!proyectos.length) {
+        tbody.innerHTML = '';
+        if (empty) empty.hidden = false;
+        return;
+      }
+      if (empty) empty.hidden = true;
+
+      tbody.innerHTML = proyectos.map(function (p) {
+        const pct = p.usagePercent == null ? 0 : Math.min(p.usagePercent, 100);
+        const clase = p.status === 'CRITICAL' ? 'op-bar--critical'
+                    : p.status === 'WARNING' ? 'op-bar--warning' : 'op-bar--normal';
+        const etiqueta = p.status === 'UNLIMITED'
+          ? '<span class="op-badge">Sin límite</span>'
+          : '<span class="op-badge op-badge--' +
+            (p.status === 'CRITICAL' ? 'danger' : p.status === 'WARNING' ? 'warning' : 'success') +
+            '">' + p.usagePercent + '%</span>';
+
+        return '<tr>' +
+          '<td><strong>' + escapeHtml(p.projectName || ('Proyecto #' + p.apiKeyId)) + '</strong></td>' +
+          '<td>' + p.fileCount + '</td>' +
+          '<td>' + escapeHtml(p.formattedUsed) + '</td>' +
+          '<td>' + escapeHtml(p.formattedQuota) + '</td>' +
+          '<td>' +
+            (p.status === 'UNLIMITED'
+              ? etiqueta
+              : '<div class="op-bar"><div class="op-bar__fill ' + clase +
+                '" style="width:' + pct + '%"></div></div> ' + etiqueta) +
+          '</td>' +
+          '<td style="text-align:right;">' +
+            '<button type="button" class="op-btn op-btn--sm op-btn--ghost" data-quota="' +
+              p.apiKeyId + '" data-name="' + escapeHtml(p.projectName || '') + '">Cuota</button>' +
+          '</td>' +
+          '</tr>';
+      }).join('');
+
+      tbody.querySelectorAll('[data-quota]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          askQuota(Number(btn.dataset.quota), btn.dataset.name);
+        });
+      });
+    } catch (err) {
+      tbody.innerHTML = '';
+      if (empty) { empty.hidden = false; empty.textContent = 'No se pudo cargar: ' + err.message; }
+    }
+  }
+
+  /** Pide el nuevo tope en gigabytes. Vacío quita el límite, que no es lo mismo que cero. */
+  function askQuota(apiKeyId, projectName) {
+    const lineas = [
+      'Cuota en GB para "' + projectName + '".',
+      '',
+      'Dejalo vacio para quitar el limite. Cero bloquearia el proyecto entero, asi que no se acepta.',
+    ];
+    const actual = window.prompt(lineas.join(String.fromCharCode(10)), '');
+    if (actual === null) return;
+
+    const texto = actual.trim();
+    let gb = null;
+    if (texto !== '') {
+      gb = Number(texto.replace(',', '.'));
+      if (!isFinite(gb) || gb <= 0) {
+        showToast('Indicá un número mayor que cero, o dejalo vacío para quitar el límite.', true);
+        return;
+      }
+    }
+
+    api('/api/admin/projects/' + apiKeyId + '/quota', {
+      method: 'PATCH',
+      body: JSON.stringify({ quotaGb: gb }),
+    }).then(function (res) {
+      showToast(res.message || 'Cuota actualizada');
+      loadStorage();
+    }).catch(function (err) {
+      showToast('No se pudo actualizar la cuota: ' + err.message, true);
+    });
+  }
+
   async function loadBackups() {
     loadBackupConfig();
     els.backupsEmpty.hidden = true;
@@ -938,6 +1034,33 @@
           'Segunda copia fuera del servidor, por si el disco local falla.';
       }
     } catch (err) {}
+  }
+
+  // ── Almacenamiento y cuotas ─────────────────────────────────────────────
+
+  const storageRefreshBtn = document.getElementById('op-storage-refresh-btn');
+  if (storageRefreshBtn) {
+    storageRefreshBtn.addEventListener('click', loadStorage);
+  }
+
+  const reindexBtn = document.getElementById('op-reindex-btn');
+  if (reindexBtn) {
+    reindexBtn.addEventListener('click', async function () {
+      const original = reindexBtn.innerHTML;
+      reindexBtn.disabled = true;
+      reindexBtn.textContent = 'Encolando…';
+      try {
+        // Responde apenas encola: el trabajo real sigue en segundo plano, asi que el boton
+        // vuelve enseguida en lugar de simular que el proceso ya termino.
+        const res = await api('/api/admin/files/reindex', { method: 'POST' });
+        showToast(res.message || 'Reindexado encolado');
+      } catch (err) {
+        showToast('No se pudo encolar el reindexado: ' + err.message, true);
+      } finally {
+        reindexBtn.disabled = false;
+        reindexBtn.innerHTML = original;
+      }
+    });
   }
 
   els.createBackupBtn.addEventListener('click', async function () {

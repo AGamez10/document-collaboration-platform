@@ -799,6 +799,14 @@
       text-overflow: ellipsis;
       text-align: center;
     }
+    /* Distintivo de coincidencia por contenido: discreto, porque acompaña al resultado en vez
+       de competir con el nombre del archivo. */
+    .op-badge-content {
+      display: inline-block; padding: 1px 6px; border-radius: 999px;
+      background: color-mix(in srgb, var(--op-accent) 14%, transparent);
+      color: var(--op-accent); font-size: 10.5px; font-weight: 600;
+      white-space: nowrap; vertical-align: middle;
+    }
     .op-card-meta { font-size: 11px; color: var(--op-text-secondary); text-align: center; margin-top: 3px; }
 
     .op-table-wrap { overflow-x: auto; }
@@ -4714,6 +4722,11 @@
     const meta = document.createElement('div');
     meta.className = 'op-card-meta';
     let metaText = formatBytes(file.size || 0) + ' · ' + formatDate(file.updatedAt || file.createdAt);
+    // Un resultado cuyo nombre no se parece en nada a lo buscado se lee como un error del
+    // buscador. Decir que la coincidencia estaba adentro convierte esa sorpresa en la respuesta.
+    if (file.matchedByContent) {
+      metaText = 'En contenido · ' + metaText;
+    }
     const fileModifier = file.updatedByName || file.createdByName;
     if (state.section === 'shared') {
       if (fileModifier) metaText += ' · Modificado por: ' + fileModifier;
@@ -4847,6 +4860,14 @@
 
     const tdSize = document.createElement('td');
     tdSize.textContent = formatBytes(file.size || 0);
+    if (file.matchedByContent) {
+      const badge = document.createElement('span');
+      badge.className = 'op-badge-content';
+      badge.textContent = 'En contenido';
+      badge.title = 'La coincidencia está dentro del documento, no en su nombre';
+      tdSize.appendChild(document.createTextNode(' '));
+      tdSize.appendChild(badge);
+    }
     tr.appendChild(tdSize);
 
     const tdDate = document.createElement('td');

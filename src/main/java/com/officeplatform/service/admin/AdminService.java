@@ -32,6 +32,13 @@ public interface AdminService {
 
     void deleteApiKey(Long id);
 
+    /**
+     * Encola el indexado de los archivos que todavia no tienen texto extraido.
+     *
+     * @return cuantos quedaron encolados
+     */
+    int reindexPendingFiles();
+
     /** Consumo y tope de cada proyecto, con su estado de saturacion. */
     java.util.List<com.officeplatform.dto.response.ProjectStorageResponse> getStorageSummary();
 

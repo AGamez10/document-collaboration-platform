@@ -1,6 +1,7 @@
 package com.officeplatform.service.search;
 
 import java.io.InputStream;
+import java.util.List;
 
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -48,6 +49,35 @@ public class FileIndexingService {
     @Transactional
     public void indexAsync(Long fileId) {
         index(fileId);
+    }
+
+    /**
+     * Indexa todo lo que quedo sin texto, en segundo plano.
+     *
+     * <p>Los archivos anteriores a esta funcionalidad tienen la columna en null. Se procesan uno
+     * por uno y no en bloque: cada documento se lee entero en memoria para extraerle el texto, asi
+     * que hacerlos todos a la vez sobre un catalogo grande tumbaria la aplicacion.
+     *
+     * <p>Un archivo que falla no detiene a los demas. En un reindexado historico es esperable
+     * encontrar documentos corruptos o cifrados de hace anos, y abortar el lote entero por uno de
+     * ellos dejaria sin indexar a todos los que venian despues.
+     *
+     * @return cuantos archivos se encolaron
+     */
+    @Async("indexingExecutor")
+    public void reindexPendingAsync(List<Long> fileIds) {
+        int ok = 0;
+        int fallidos = 0;
+        for (Long id : fileIds) {
+            try {
+                index(id);
+                ok++;
+            } catch (Exception e) {
+                fallidos++;
+                log.warn("No se pudo reindexar el archivo {}: {}", id, e.getMessage());
+            }
+        }
+        log.info("Reindexado historico terminado: {} procesados, {} con error", ok, fallidos);
     }
 
     /** Misma indexación, en el hilo del llamador. Existe para poder probarla sin asincronía. */
