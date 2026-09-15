@@ -50,6 +50,39 @@ class DocumentTextExtractorTest {
         return "<w:p><w:r><w:t>" + texto + "</w:t></w:r></w:p>";
     }
 
+    /** ZIP con una sola parte, que es la forma de todo OOXML y OpenDocument. */
+    private byte[] zipWith(String partName, String xml) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            zip.putNextEntry(new ZipEntry("[Content_Types].xml"));
+            zip.write("<Types/>".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            zip.putNextEntry(new ZipEntry(partName));
+            zip.write(xml.getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        return out.toByteArray();
+    }
+
+    /** PDF real, generado con la misma libreria que despues lo lee. */
+    private byte[] pdf(String texto) throws Exception {
+        try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            org.apache.pdfbox.pdmodel.PDPage page = new org.apache.pdfbox.pdmodel.PDPage();
+            doc.addPage(page);
+            try (org.apache.pdfbox.pdmodel.PDPageContentStream cs =
+                         new org.apache.pdfbox.pdmodel.PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(org.apache.pdfbox.pdmodel.font.PDType1Font.HELVETICA, 12);
+                cs.newLineAtOffset(50, 700);
+                cs.showText(texto);
+                cs.endText();
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
     // ── .docx ────────────────────────────────────────────────────────────────
 
     @Test
@@ -132,11 +165,88 @@ class DocumentTextExtractorTest {
 
     // ── lo que no da texto ───────────────────────────────────────────────────
 
+    // ── el resto de los formatos ofimaticos ─────────────────────────────────
+
     @Test
-    @DisplayName("a format that yields no text is left unindexed instead of failing")
-    void leavesUnsupportedFormatsAlone() {
-        assertThat(extractor.extract(new byte[] { 1, 2, 3 }, "plano.pdf")).isNull();
+    @DisplayName("a spreadsheet gives up the text of its cells")
+    void extractsTheTextOfASpreadsheet() throws Exception {
+        // Excel guarda una sola vez cada cadena en sharedStrings y las celdas la referencian:
+        // es la parte que concentra el texto del libro.
+        byte[] file = zipWith("xl/sharedStrings.xml",
+                "<sst><si><t>Presupuesto anual</t></si><si><t>Soldadura</t></si></sst>");
+
+        String text = extractor.extract(file, "planilla.xlsx");
+
+        assertThat(text).contains("Presupuesto anual").contains("Soldadura");
+        assertThat(text).doesNotContain("<").doesNotContain("sst");
+    }
+
+    @Test
+    @DisplayName("a macro-enabled workbook is read like any other spreadsheet")
+    void readsXlsm() throws Exception {
+        byte[] file = zipWith("xl/sharedStrings.xml", "<sst><si><t>Con macros</t></si></sst>");
+
+        assertThat(extractor.extract(file, "planilla.xlsm")).isEqualTo("Con macros");
+    }
+
+    @Test
+    @DisplayName("a presentation gives up the text of its slides")
+    void extractsTheTextOfAPresentation() throws Exception {
+        byte[] file = zipWith("ppt/slides/slide1.xml",
+                "<p:sld><p:cSld><a:p><a:r><a:t>Plan de calidad</a:t></a:r></a:p></p:cSld></p:sld>");
+
+        assertThat(extractor.extract(file, "charla.pptx")).contains("Plan de calidad");
+    }
+
+    @Test
+    @DisplayName("an OpenDocument file gives up the text of its content part")
+    void extractsTheTextOfAnOpenDocument() throws Exception {
+        byte[] file = zipWith("content.xml",
+                "<office:document-content><text:p>Acta de reunion</text:p>"
+                        + "<text:p><text:span>Segundo parrafo</text:span></text:p></office:document-content>");
+
+        String text = extractor.extract(file, "acta.odt");
+
+        assertThat(text).contains("Acta de reunion").contains("Segundo parrafo");
+    }
+
+    @Test
+    @DisplayName("a PDF gives up its text instead of staying unsearchable")
+    void extractsTheTextOfAPdf() throws Exception {
+        // Era el formato mas numeroso entre los que quedaban sin indexar.
+        byte[] file = pdf("Procedimiento de soldadura ISO 9001");
+
+        assertThat(extractor.extract(file, "procedimiento.pdf"))
+                .contains("Procedimiento de soldadura ISO 9001");
+    }
+
+    @Test
+    @DisplayName("a corrupt PDF is treated as having no text, not as a failure")
+    void survivesACorruptPdf() throws Exception {
+        assertThat(extractor.extract("esto no es un pdf".getBytes(StandardCharsets.UTF_8), "roto.pdf"))
+                .isNull();
+    }
+
+    @Test
+    @DisplayName("the additional text and configuration formats are read directly")
+    void readsTheAdditionalTextFormats() {
+        for (String name : new String[] { "consulta.sql", "config.yaml", "config.yml",
+                                          "ajustes.ini", "servidor.conf", "datos.tsv", "pagina.html" }) {
+            assertThat(extractor.extract("contenido buscable".getBytes(StandardCharsets.UTF_8), name))
+                    .as("formato %s", name)
+                    .isEqualTo("contenido buscable");
+        }
+    }
+
+    @Test
+    @DisplayName("binary and multimedia formats are left unindexed instead of failing")
+    void leavesBinaryFormatsAlone() {
+        // Imagen, audio, video y comprimidos se buscan por nombre y metadatos: pretender leerlos
+        // solo gastaria tiempo. El PDF salio de esta lista porque ahora si se extrae.
         assertThat(extractor.extract(new byte[] { 1, 2, 3 }, "foto.jpg")).isNull();
+        assertThat(extractor.extract(new byte[] { 1, 2, 3 }, "video.mp4")).isNull();
+        assertThat(extractor.extract(new byte[] { 1, 2, 3 }, "audio.mp3")).isNull();
+        assertThat(extractor.extract(new byte[] { 1, 2, 3 }, "paquete.zip")).isNull();
         assertThat(extractor.extract(new byte[] { 1, 2, 3 }, "sin-extension")).isNull();
     }
 

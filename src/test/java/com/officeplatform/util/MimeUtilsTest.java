@@ -151,6 +151,80 @@ class MimeUtilsTest {
         assertThat(MimeUtils.matchesExtension("virus.exe", ODT)).isFalse();
     }
 
+    // ── gestor universal: multimedia, comprimidos y texto ────────────────────
+
+    @Test
+    @DisplayName("images, video and audio are accepted like any other document")
+    void acceptsMultimedia() {
+        // El gestor reemplaza a una unidad de red, y ahi conviven planos, fotos de obra y
+        // grabaciones. Rechazarlos obligaria a seguir usando G: para todo lo que no sea ofimatico.
+        assertThat(MimeUtils.matchesExtension("plano.png", "image/png")).isTrue();
+        assertThat(MimeUtils.matchesExtension("obra.jpg", "image/jpeg")).isTrue();
+        assertThat(MimeUtils.matchesExtension("obra.jpeg", "image/jpeg")).isTrue();
+        assertThat(MimeUtils.matchesExtension("capacitacion.mp4", "video/mp4")).isTrue();
+        assertThat(MimeUtils.matchesExtension("reunion.mp3", "audio/mpeg")).isTrue();
+    }
+
+    @Test
+    @DisplayName("archives and text formats are accepted")
+    void acceptsArchivesAndText() {
+        assertThat(MimeUtils.matchesExtension("respaldo.zip", "application/zip")).isTrue();
+        assertThat(MimeUtils.matchesExtension("planos.rar", "application/vnd.rar")).isTrue();
+        assertThat(MimeUtils.matchesExtension("datos.7z", "application/x-7z-compressed")).isTrue();
+        assertThat(MimeUtils.matchesExtension("consulta.sql", "application/sql")).isTrue();
+        assertThat(MimeUtils.matchesExtension("config.yaml", "text/yaml")).isTrue();
+        assertThat(MimeUtils.matchesExtension("pagina.html", "text/html")).isTrue();
+    }
+
+    @Test
+    @DisplayName("each new type still demands its own extension")
+    void keepsTypeAndExtensionTiedTogether() {
+        // Ampliar lo que se acepta no puede aflojar la comprobacion: el tipo declarado y la
+        // extension siguen teniendo que concordar.
+        assertThat(MimeUtils.matchesExtension("plano.png", "video/mp4")).isFalse();
+        assertThat(MimeUtils.matchesExtension("video.mp4", "image/png")).isFalse();
+        assertThat(MimeUtils.matchesExtension("respaldo.zip", "audio/mpeg")).isFalse();
+    }
+
+    @Test
+    @DisplayName("an executable is refused no matter what type it claims to be")
+    void refusesExecutables() {
+        for (String name : new String[] { "virus.exe", "script.bat", "script.cmd", "instalador.msi",
+                                          "script.sh", "macro.vbs", "script.ps1" }) {
+            assertThat(MimeUtils.isBlockedExecutable(name)).as("archivo %s", name).isTrue();
+            // Ningun tipo legitima un ejecutable, ni siquiera uno de la lista blanca.
+            assertThat(MimeUtils.matchesExtension(name, "application/zip")).as("archivo %s", name).isFalse();
+            assertThat(MimeUtils.matchesExtension(name, "text/plain")).as("archivo %s", name).isFalse();
+        }
+    }
+
+    @Test
+    @DisplayName("an executable hidden behind a second extension is still refused")
+    void refusesADisguisedExecutable() {
+        // "informe.pdf.exe" es un ejecutable con nombre disfrazado: mirar la primera extension
+        // es el descuido que ese nombre busca explotar.
+        assertThat(MimeUtils.isBlockedExecutable("informe.pdf.exe")).isTrue();
+        assertThat(MimeUtils.matchesExtension("informe.pdf.exe", "application/pdf")).isFalse();
+    }
+
+    @Test
+    @DisplayName("a legitimate file is never mistaken for an executable")
+    void doesNotBlockLegitimateFiles() {
+        for (String name : new String[] { "informe.docx", "plano.png", "video.mp4",
+                                          "respaldo.zip", "consulta.sql", "notas.md" }) {
+            assertThat(MimeUtils.isBlockedExecutable(name)).as("archivo %s", name).isFalse();
+        }
+    }
+
+    @Test
+    @DisplayName("multimedia downloads are served with the type their extension deserves")
+    void servesMultimediaWithItsCanonicalType() {
+        assertThat(MimeUtils.contentTypeForFileName("plano.png", null)).isEqualTo("image/png");
+        assertThat(MimeUtils.contentTypeForFileName("video.mp4", null)).isEqualTo("video/mp4");
+        assertThat(MimeUtils.contentTypeForFileName("audio.mp3", null)).isEqualTo("audio/mpeg");
+        assertThat(MimeUtils.contentTypeForFileName("paquete.zip", null)).isEqualTo("application/zip");
+    }
+
     @Test
     @DisplayName("null arguments are rejected instead of throwing")
     void handlesNulls() {

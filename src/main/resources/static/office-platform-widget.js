@@ -49,16 +49,44 @@
     return;
   }
 
-  // Incluye los formatos con macros y sus plantillas. El widget rechaza en el navegador
-  // antes de enviar la petición, así que una extensión ausente acá se traduce en un toast
-  // de "Tipo de archivo no permitido" que nunca llega al backend: esta lista y la de
-  // allowed-mime-types del servidor tienen que moverse juntas.
-  const ALLOWED_EXTENSIONS = [
-    'docx', 'doc', 'docm', 'dotm',
-    'xlsx', 'xls', 'xlsm', 'xltm', 'xlsb',
-    'pptx', 'ppt', 'pptm', 'potm',
-    'odt', 'ods', 'odp', 'pdf',
-  ];
+  // El gestor reemplaza a la unidad de red corporativa, y ahí no vive solo ofimática:
+  // conviven planos escaneados, fotos de obra, grabaciones de reunión y respaldos
+  // comprimidos. Cada familia declara sus extensiones una sola vez y de acá se derivan
+  // tanto la lista de subida como la clasificación, así no pueden desincronizarse.
+  //
+  // Esta tabla espeja MIME_TYPE_BY_EXTENSION de MimeUtils: el widget rechaza en el
+  // navegador antes de enviar la petición, así que una extensión ausente acá se traduce
+  // en un toast de "Tipo de archivo no permitido" que nunca llega al backend.
+  const EXTENSIONS_BY_KIND = {
+    word: ['docx', 'doc', 'docm', 'dotm', 'odt'],
+    excel: ['xlsx', 'xls', 'xlsm', 'xltm', 'xlsb', 'ods'],
+    powerpoint: ['pptx', 'ppt', 'pptm', 'potm', 'odp'],
+    pdf: ['pdf'],
+    image: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'ico'],
+    video: ['mp4', 'webm', 'ogv', 'avi', 'mov', 'mkv'],
+    audio: ['mp3', 'wav', 'ogg', 'm4a', 'aac'],
+    archive: ['zip', 'rar', '7z', 'tar', 'gz'],
+    text: ['txt', 'csv', 'tsv', 'md', 'json', 'xml', 'log', 'sql',
+           'yaml', 'yml', 'ini', 'conf', 'rtf', 'html', 'htm'],
+  };
+
+  const ALLOWED_EXTENSIONS = Object.keys(EXTENSIONS_BY_KIND).reduce(function (all, kind) {
+    return all.concat(EXTENSIONS_BY_KIND[kind]);
+  }, []);
+
+  const KIND_BY_EXTENSION = (function () {
+    const byExt = {};
+    Object.keys(EXTENSIONS_BY_KIND).forEach(function (kind) {
+      EXTENSIONS_BY_KIND[kind].forEach(function (ext) { byExt[ext] = kind; });
+    });
+    return byExt;
+  })();
+
+  // De los formatos de texto, estos son los únicos que el Document Server abre de verdad.
+  // El resto (json, sql, yaml, log…) llegaría como documentType "word" con un fileType que
+  // no reconoce, y el editor abriría en blanco con un error sin explicación.
+  const EDITABLE_TEXT_EXTENSIONS = ['txt', 'csv', 'rtf', 'html', 'htm'];
+
   const ACCEPT_ATTR = ALLOWED_EXTENSIONS.map(function (e) { return '.' + e; }).join(',');
 
   // ── CSS ─────────────────────────────────────────────────────────────────
@@ -1028,6 +1056,28 @@
       font-weight: 500;
     }
 
+    /* ── Visor de multimedia ───────────────────────────────────────────── */
+    .op-media-modal { max-width: 900px; width: 92vw; }
+    .op-audio-modal { max-width: 520px; width: 92vw; }
+    .op-media-stage {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 180px;
+      padding: var(--op-space-3) 0 var(--op-space-4);
+      color: var(--op-text-secondary);
+      font-size: 13.5px;
+      text-align: center;
+    }
+    .op-media-stage img,
+    .op-media-stage video {
+      max-width: 100%;
+      max-height: 64vh;
+      border-radius: 10px;
+      background: var(--op-bg-hover);
+    }
+    .op-media-stage audio { width: 100%; }
+
     /* ── Folder picker (move-to modal) ─────────────────────────────────── */
     .op-picker-path {
       display: flex;
@@ -1402,22 +1452,34 @@
   }
 
   function getFileKind(file) {
-    const mime = (file.mimeType || '').toLowerCase();
     const ext = extensionOf(file.originalFileName);
-    // El MIME de macros lleva el nombre del producto ('ms-word.', 'ms-excel.', 'ms-powerpoint.'),
-    // así que cada familia lo reconoce por su propio prefijo. El comodín 'macroenabled' queda
-    // como último recurso, después de Word y PowerPoint: si se evaluara antes, un .pptm caería
-    // en la rama de Excel y se mostraría con el icono equivocado.
-    if (mime.indexOf('wordprocessingml') >= 0 || mime.indexOf('msword') >= 0 || mime.indexOf('ms-word') >= 0 || ['doc', 'docx', 'docm', 'dotm', 'odt'].indexOf(ext) >= 0) return 'word';
-    if (mime.indexOf('spreadsheetml') >= 0 || mime.indexOf('ms-excel') >= 0 || ['xls', 'xlsx', 'xlsm', 'xltm', 'xlsb', 'ods'].indexOf(ext) >= 0) return 'excel';
-    if (mime.indexOf('presentationml') >= 0 || mime.indexOf('ms-powerpoint') >= 0 || ['ppt', 'pptx', 'pptm', 'potm', 'odp'].indexOf(ext) >= 0) return 'powerpoint';
+    // La extensión manda: es lo que el usuario ve y lo que decide con qué programa abre.
+    const byExtension = KIND_BY_EXTENSION[ext];
+    if (byExtension) return byExtension;
+
+    // Sin extensión conocida queda el MIME declarado. El de macros lleva el nombre del
+    // producto ('ms-word.', 'ms-excel.', 'ms-powerpoint.'), así que cada familia lo reconoce
+    // por su propio prefijo. El comodín 'macroenabled' queda como último recurso, después de
+    // Word y PowerPoint: si se evaluara antes, un .pptm caería en la rama de Excel.
+    const mime = (file.mimeType || '').toLowerCase();
+    if (mime.indexOf('wordprocessingml') >= 0 || mime.indexOf('msword') >= 0 || mime.indexOf('ms-word') >= 0) return 'word';
+    if (mime.indexOf('spreadsheetml') >= 0 || mime.indexOf('ms-excel') >= 0) return 'excel';
+    if (mime.indexOf('presentationml') >= 0 || mime.indexOf('ms-powerpoint') >= 0) return 'powerpoint';
     if (mime.indexOf('macroenabled') >= 0) return 'excel';
-    if (mime.indexOf('pdf') >= 0 || ext === 'pdf') return 'pdf';
+    if (mime.indexOf('pdf') >= 0) return 'pdf';
+    if (mime.indexOf('image/') === 0) return 'image';
+    if (mime.indexOf('video/') === 0) return 'video';
+    if (mime.indexOf('audio/') === 0) return 'audio';
+    if (mime.indexOf('text/') === 0) return 'text';
     return 'other';
   }
 
   function kindLabel(kind) {
-    const labels = { word: 'Word', excel: 'Excel', powerpoint: 'PowerPoint', pdf: 'PDF', other: 'Otro' };
+    const labels = {
+      word: 'Word', excel: 'Excel', powerpoint: 'PowerPoint', pdf: 'PDF',
+      image: 'Imagen', video: 'Video', audio: 'Audio',
+      archive: 'Comprimido', text: 'Texto', other: 'Otro',
+    };
     return labels[kind] || 'Otro';
   }
 
@@ -1433,10 +1495,20 @@
       .replace(/"/g, '&quot;');
   }
 
-  // docx = blue W · xlsx = green X · pptx = orange P · pdf = red PDF · other = gray generic
+  // Cada familia con su color y su sigla: el usuario distingue una carpeta llena de archivos
+  // de un vistazo, sin leer nombre por nombre. Los colores de ofimática son los de la marca
+  // (Word azul, Excel verde, PowerPoint naranja) y el resto sigue la misma lógica de contraste.
   function fileIconSvg(kind) {
-    const colors = { word: '#2b579a', excel: '#217346', powerpoint: '#d24726', pdf: '#d32f2f', other: '#868e96' };
-    const labels = { word: 'W', excel: 'X', powerpoint: 'P', pdf: 'PDF', other: '' };
+    const colors = {
+      word: '#2b579a', excel: '#217346', powerpoint: '#d24726', pdf: '#d32f2f',
+      image: '#8e44ad', video: '#e91e63', audio: '#009688',
+      archive: '#f39c12', text: '#607d8b', other: '#78909c',
+    };
+    const labels = {
+      word: 'W', excel: 'X', powerpoint: 'P', pdf: 'PDF',
+      image: 'IMG', video: 'VID', audio: 'AUD',
+      archive: 'ZIP', text: 'TXT', other: '',
+    };
     const color = colors[kind] || colors.other;
     const label = labels[kind] || '';
     const fontSize = label.length > 1 ? 9 : 15;
@@ -1923,6 +1995,113 @@
     a.click();
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+  }
+
+  // ── Visor de multimedia ──────────────────────────────────────────────────
+  // Las imágenes, el video y el audio no pasan por OnlyOffice: el Document Server no los
+  // entiende y el usuario terminaría frente a un editor vacío. Se muestran acá con los
+  // elementos nativos del navegador, que ya traen controles, volumen y pantalla completa.
+
+  /**
+   * Trae el binario como Blob conservando el Content-Type de la respuesta.
+   *
+   * <p>No se puede apuntar un <img> o un <video> directo a /api/files/N/download: esa ruta
+   * exige la cabecera de autenticación y el navegador no la manda en un src, así que
+   * devolvería 401. El tipo importa tanto como los bytes — un Blob sin type no lo reproduce
+   * ningún <video> —, y el backend ya resuelve el canónico desde la extensión (MimeUtils).
+   */
+  async function downloadFileBlob(id) {
+    const res = await apiFetch('/api/files/' + id + '/download');
+    return res.blob();
+  }
+
+  function buildMediaElement(kind, objectUrl, fileName) {
+    if (kind === 'image') {
+      const img = document.createElement('img');
+      img.src = objectUrl;
+      img.alt = fileName;
+      return img;
+    }
+    const player = document.createElement(kind === 'video' ? 'video' : 'audio');
+    player.src = objectUrl;
+    player.controls = true;
+    // Sin preload el navegador no conoce la duración y la barra de progreso arranca vacía.
+    player.preload = 'metadata';
+    return player;
+  }
+
+  async function openMediaViewer(id, fileName, kind) {
+    const shell = buildModalShell(fileName);
+    shell.box.classList.add(kind === 'audio' ? 'op-audio-modal' : 'op-media-modal');
+    shell.box.classList.add('op-' + kind + '-modal');
+
+    const stage = document.createElement('div');
+    stage.className = 'op-media-stage';
+    stage.textContent = 'Cargando…';
+    shell.body.appendChild(stage);
+
+    // El objeto URL vive mientras el visor está abierto; sin revocarlo, el archivo entero
+    // queda retenido en memoria hasta recargar la página.
+    let objectUrl = null;
+    function release() {
+      if (objectUrl) { URL.revokeObjectURL(objectUrl); objectUrl = null; }
+    }
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'op-btn-secondary';
+    closeBtn.textContent = 'Cerrar';
+    closeBtn.onclick = function () { release(); closeModal(); };
+
+    const downloadBtn = document.createElement('button');
+    downloadBtn.type = 'button';
+    downloadBtn.className = 'op-btn-primary';
+    downloadBtn.textContent = 'Descargar';
+    downloadBtn.onclick = function () { downloadSingle(id, fileName); };
+
+    shell.ft.appendChild(closeBtn);
+    shell.ft.appendChild(downloadBtn);
+    // El fondo ya cierra el modal por su cuenta; esto solo agrega la liberación de memoria.
+    shell.backdrop.addEventListener('click', function (e) { if (e.target === shell.backdrop) release(); });
+
+    try {
+      const blob = await downloadFileBlob(id);
+      objectUrl = URL.createObjectURL(blob);
+      stage.textContent = '';
+      stage.appendChild(buildMediaElement(kind, objectUrl, fileName));
+    } catch (err) {
+      stage.textContent = 'No se pudo cargar el archivo: ' + err.message;
+    }
+  }
+
+  function downloadForDesktop(id, fileName) {
+    downloadSingle(id, fileName);
+    toast('Descargando ' + fileName + '. Este formato se abre con una aplicación de escritorio.', 'info');
+  }
+
+  /**
+   * Decide con qué visor abre cada archivo.
+   *
+   * <p>El Document Server solo entiende ofimática y PDF. Mandarle una foto, un video o un
+   * comprimido deja al usuario frente a un editor en blanco con un error que no explica nada,
+   * así que cada familia abre donde corresponde: el editor para documentos, el visor propio
+   * para multimedia, y descarga directa para lo que el navegador no puede mostrar.
+   */
+  function openFile(id, fileName, mimeType) {
+    const kind = getFileKind({ originalFileName: fileName, mimeType: mimeType });
+    if (kind === 'image' || kind === 'video' || kind === 'audio') {
+      openMediaViewer(id, fileName, kind);
+      return;
+    }
+    if (kind === 'archive' || kind === 'other') {
+      downloadForDesktop(id, fileName);
+      return;
+    }
+    if (kind === 'text' && EDITABLE_TEXT_EXTENSIONS.indexOf(extensionOf(fileName || '')) < 0) {
+      downloadForDesktop(id, fileName);
+      return;
+    }
+    openEditor(id, fileName);
   }
 
   // ── Excel de escritorio ──────────────────────────────────────────────────
@@ -3989,7 +4168,7 @@
       ];
     }
     const items = [
-      menuItem('Abrir', ICONS.open, false, function () { openEditor(file.id, file.originalFileName); }),
+      menuItem('Abrir', ICONS.open, false, function () { openFile(file.id, file.originalFileName, file.mimeType); }),
       menuItem('Descargar', ICONS.download, false, function () { downloadSingle(file.id, file.originalFileName); }),
       menuItem('Renombrar', ICONS.rename, false, function () { handleRename(file); }),
       menuItem('Mover', ICONS.move, false, function () { showMovePicker(file); }),
@@ -4090,7 +4269,7 @@
   const state = {
     section: 'files',       // 'files' | 'recent' | 'trash'
     search: '',
-    typeFilter: 'all',       // 'all' | 'word' | 'excel' | 'powerpoint' | 'pdf'
+    typeFilter: 'all',       // 'all' o cualquier clave de EXTENSIONS_BY_KIND, más 'other'
     sortField: 'name',       // 'name' | 'date' | 'size'
     sortDir: 'asc',          // 'asc' | 'desc'
     viewMode: 'grid',        // 'grid' | 'list'
@@ -4763,7 +4942,7 @@
 
     card.onclick = function () {
       if (state.selectionMode) { toggleSelect(file.id); return; }
-      if (!trashed) openEditor(file.id, file.originalFileName);
+      if (!trashed) openFile(file.id, file.originalFileName, file.mimeType);
     };
     card.oncontextmenu = function (e) {
       e.preventDefault();
@@ -4914,7 +5093,7 @@
 
     tr.onclick = function () {
       if (state.selectionMode) { toggleSelect(file.id); return; }
-      if (!trashed) openEditor(file.id, file.originalFileName);
+      if (!trashed) openFile(file.id, file.originalFileName, file.mimeType);
     };
     tr.oncontextmenu = function (e) {
       e.preventDefault();
@@ -5237,7 +5416,7 @@
     // caller's project); that surfaces as a toast from openEditor, which is acceptable for now.
     if (resource.resourceType === 'FILE') {
       card.style.cursor = 'pointer';
-      card.onclick = function () { openEditor(resource.resourceId, resource.resourceName); };
+      card.onclick = function () { openFile(resource.resourceId, resource.resourceName, resource.mimeType); };
     } else if (resource.resourceType === 'FOLDER') {
       card.style.cursor = 'pointer';
       card.onclick = function () {
@@ -5258,7 +5437,7 @@
     const items = [];
     if (resource.resourceType === 'FILE') {
       items.push(menuItem('Abrir', ICONS.open, false, function () {
-        openEditor(resource.resourceId, resource.resourceName);
+        openFile(resource.resourceId, resource.resourceName, resource.mimeType);
       }));
       items.push(menuItem('Descargar', ICONS.download, false, function () {
         downloadSingle(resource.resourceId, resource.resourceName);
@@ -5488,6 +5667,12 @@
             '<option value="excel">Excel</option>' +
             '<option value="powerpoint">PowerPoint</option>' +
             '<option value="pdf">PDF</option>' +
+            '<option value="image">Imágenes</option>' +
+            '<option value="video">Video</option>' +
+            '<option value="audio">Audio</option>' +
+            '<option value="archive">Comprimidos</option>' +
+            '<option value="text">Texto</option>' +
+            '<option value="other">Otros</option>' +
           '</select>' +
           '<div class="op-sort-wrap">' +
             '<select class="op-sort-field" aria-label="Ordenar por">' +
@@ -5547,7 +5732,7 @@
     creator(state.currentFolderId).then(function (file) {
       btn.disabled = false;
       toast('Documento creado', 'success');
-      return loadFiles().then(function () { openEditor(file.fileId, file.originalFileName); });
+      return loadFiles().then(function () { openFile(file.fileId, file.originalFileName, file.mimeType); });
     }).catch(function (err) {
       btn.disabled = false;
       toast('Error al crear el documento: ' + err.message, 'error');

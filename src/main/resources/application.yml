@@ -34,8 +34,10 @@ spring:
   servlet:
     multipart:
       enabled: true
-      max-file-size: ${office-platform.storage.max-file-size:20MB}
-      max-request-size: ${office-platform.storage.max-file-size:20MB}
+      # 500 MB para que entre un video de obra o un respaldo comprimido. El gestor reemplaza a
+      # una unidad de red, y en una unidad de red nadie se pregunta si su archivo "entra".
+      max-file-size: ${OFFICE_PLATFORM_MAX_FILE_SIZE:500MB}
+      max-request-size: ${OFFICE_PLATFORM_MAX_FILE_SIZE:500MB}
 
 springdoc:
   api-docs:
@@ -45,9 +47,9 @@ springdoc:
 
 office-platform:
   storage:
-    max-file-size: 20MB
+    max-file-size: ${OFFICE_PLATFORM_MAX_FILE_SIZE:500MB}
     max-total-size: ${OFFICE_PLATFORM_MAX_TOTAL_SIZE:53687091200}
-    allowed-mime-types: application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.ms-excel.template.macroEnabled.12,application/vnd.ms-excel.sheet.binary.macroEnabled.12,application/vnd.ms-word.document.macroEnabled.12,application/vnd.ms-word.template.macroEnabled.12,application/vnd.ms-powerpoint.presentation.macroEnabled.12,application/vnd.ms-powerpoint.template.macroEnabled.12,application/vnd.oasis.opendocument.text,application/vnd.oasis.opendocument.spreadsheet,application/vnd.oasis.opendocument.presentation
+    allowed-mime-types: application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-powerpoint,application/vnd.openxmlformats-officedocument.presentationml.presentation,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.ms-excel.template.macroEnabled.12,application/vnd.ms-excel.sheet.binary.macroEnabled.12,application/vnd.ms-word.document.macroEnabled.12,application/vnd.ms-word.template.macroEnabled.12,application/vnd.ms-powerpoint.presentation.macroEnabled.12,application/vnd.ms-powerpoint.template.macroEnabled.12,application/vnd.oasis.opendocument.text,application/vnd.oasis.opendocument.spreadsheet,application/vnd.oasis.opendocument.presentation,image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/bmp,image/x-icon,image/vnd.microsoft.icon,video/mp4,video/webm,video/ogg,video/quicktime,video/x-msvideo,video/x-matroska,audio/mpeg,audio/wav,audio/x-wav,audio/ogg,audio/aac,audio/mp4,application/zip,application/x-zip-compressed,application/x-rar-compressed,application/vnd.rar,application/x-7z-compressed,application/x-tar,application/gzip,text/plain,text/csv,text/tab-separated-values,text/markdown,application/json,application/xml,text/xml,text/html,application/sql,text/yaml,application/x-yaml,application/rtf,text/rtf
     minio:
       endpoint: http://minio:9000
       access-key: ${MINIO_ACCESS_KEY:minioadmin}
