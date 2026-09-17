@@ -670,7 +670,7 @@
       const trashed = state.filesTrashed;
       const isTrashedView = trashed === 'true';
       els.filesHint.textContent = isTrashedView
-        ? 'Archivos en papelera de reciclaje. Puedes restaurar un archivo a su ubicación original o purgarlo definitivamente del almacenamiento MinIO.'
+        ? 'Papelera de reciclaje. Incluye los archivos que sus dueños ya vaciaron de su propia papelera: para ellos el archivo no existe, y esta pantalla es el único lugar donde todavía se puede recuperar. Purgar es la única eliminación real, y borra el binario de MinIO junto con la fila.'
         : 'Listado de archivos activos almacenados en la plataforma.';
 
       const body = await api('/api/admin/files?trashed=' + trashed);
@@ -678,8 +678,12 @@
       els.filesEmpty.hidden = files.length > 0;
 
       els.filesTbody.innerHTML = files.map(function (f) {
+        const estado = f.userPurgedAt
+          ? '<div style="margin-top:4px;"><span class="op-badge op-badge--warning" title="Vaciado el '
+              + escapeHtml(formatDate(f.userPurgedAt)) + '">Vaciado por el usuario</span></div>'
+          : '<div style="margin-top:4px;"><span class="op-badge op-badge--muted">En papelera del usuario</span></div>';
         return '<tr>' +
-          '<td><strong>' + escapeHtml(f.originalFileName) + '</strong></td>' +
+          '<td><strong>' + escapeHtml(f.originalFileName) + '</strong>' + (isTrashedView ? estado : '') + '</td>' +
           '<td>' + escapeHtml(f.folderPath || 'Raíz') + '</td>' +
           '<td><span class="op-badge op-badge--muted">' + escapeHtml(f.mimeType || 'Documento') + '</span></td>' +
           '<td>' + formatBytes(f.size) + '</td>' +
@@ -701,7 +705,7 @@
         btn.addEventListener('click', async function () {
           const id = btn.dataset.restoreId;
           const name = btn.dataset.fileName;
-          if (!window.confirm('¿Restaurar el archivo "' + name + '" a su ubicación original?')) return;
+          if (!window.confirm('¿Restaurar el archivo "' + name + '" y devolverlo a su dueño? Volverá a estar activo en su carpeta original, o en la raíz si esa carpeta ya no existe.')) return;
           try {
             await api('/api/admin/files/' + id + '/restore', { method: 'POST' });
             showToast('Archivo "' + name + '" restaurado con éxito.');

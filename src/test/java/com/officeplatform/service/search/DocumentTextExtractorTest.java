@@ -25,6 +25,22 @@ import org.junit.jupiter.api.Test;
  */
 class DocumentTextExtractorTest {
 
+    /**
+     * RTF como lo escribe un procesador real: tabla de fuentes, tabla de colores, grupo ignorable
+     * del generador, acentos en hexadecimal y un carácter Unicode con su reemplazo para lectores
+     * viejos. Todo eso rodea al texto que de verdad importa.
+     */
+    private static final String RTF =
+            "{\\rtf1\\ansi\\deff0"
+            + "{\\fonttbl{\\f0\\fnil Arial;}{\\f1\\fnil Times New Roman;}}"
+            + "{\\colortbl;\\red255\\green0\\blue0;}"
+            + "{\\*\\generator Riched20 10.0;}"
+            + "\\pard\\f0\\fs24 Informe de calidad\\par "
+            + "Resultado: aprobado\\par "
+            + "Responsable: Jos\\'e9 P\\'e9rez\\par "
+            + "Medici\\u243?n de espesor\\par "
+            + "}";
+
     private DocumentTextExtractor extractor;
 
     @BeforeEach
@@ -81,6 +97,49 @@ class DocumentTextExtractorTest {
             doc.save(out);
             return out.toByteArray();
         }
+    }
+
+    /**
+     * Binario al estilo OLE2: cadenas legibles separadas por bytes de formato.
+     *
+     * <p>No es un contenedor OLE2 válido y no necesita serlo. Lo que se fija acá es el rescate de
+     * texto entre bytes de estructura, que es exactamente la situación de un .doc real: el
+     * extractor no interpreta el formato, junta lo que se puede leer.
+     *
+     * @param ancho si el texto va en UTF-16LE (Word, PowerPoint) o en un byte por carácter (Excel)
+     */
+    private byte[] binarioViejo(boolean ancho, String... cadenas) {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        // Encabezado de un contenedor OLE2, que es puro byte de control. Termina en ceros como
+        // el de un archivo real: entre la firma y el primer flujo hay campos de longitud, no una
+        // letra pegada al texto.
+        out.writeBytes(new byte[] { (byte) 0xD0, (byte) 0xCF, 0x11, (byte) 0xE0,
+                                    (byte) 0xA1, (byte) 0xB1, 0x1A, (byte) 0xE1, 0, 0, 0, 0 });
+        for (String cadena : cadenas) {
+            out.writeBytes(cadena.getBytes(ancho ? StandardCharsets.UTF_16LE : StandardCharsets.ISO_8859_1));
+            // Relleno de formato entre una cadena y la siguiente.
+            out.writeBytes(new byte[] { 0, 0, 0, 0, 0x01, (byte) 0x8A, 0x00, 0x00 });
+        }
+        return out.toByteArray();
+    }
+
+    /** ZIP con la tabla de cadenas binaria de un .xlsb, que guarda su texto en UTF-16LE. */
+    private byte[] xlsb(String... cadenas) throws Exception {
+        ByteArrayOutputStream partes = new ByteArrayOutputStream();
+        for (String cadena : cadenas) {
+            partes.writeBytes(cadena.getBytes(StandardCharsets.UTF_16LE));
+            partes.writeBytes(new byte[] { 0, 0, 0x25, 0x00, 0x00, 0x00 });
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(out)) {
+            zip.putNextEntry(new ZipEntry("[Content_Types].xml"));
+            zip.write("<Types/>".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+            zip.putNextEntry(new ZipEntry("xl/sharedStrings.bin"));
+            zip.write(partes.toByteArray());
+            zip.closeEntry();
+        }
+        return out.toByteArray();
     }
 
     // ── .docx ────────────────────────────────────────────────────────────────
@@ -236,6 +295,127 @@ class DocumentTextExtractorTest {
                     .as("formato %s", name)
                     .isEqualTo("contenido buscable");
         }
+    }
+
+    // ── Office binario antiguo ───────────────────────────────────────────────
+
+    @Test
+    @DisplayName("a legacy .doc gives up its text even without an office library")
+    void extractsTheTextOfALegacyWordDocument() {
+        byte[] file = binarioViejo(true, "Procedimiento de calidad", "Revision anual del proceso");
+
+        String texto = extractor.extract(file, "procedimiento.doc");
+
+        assertThat(texto).contains("Procedimiento de calidad").contains("Revision anual del proceso");
+    }
+
+    @Test
+    @DisplayName("a legacy .xls gives up its cells, stored one byte per character")
+    void extractsTheCellsOfALegacyWorkbook() {
+        // Excel guarda muchas cadenas con un byte por caracter y no en UTF-16 como Word: sin la
+        // segunda pasada el libro entero quedaria sin indexar.
+        byte[] file = binarioViejo(false, "Costo unitario", "Proveedor autorizado");
+
+        String texto = extractor.extract(file, "costos.xls");
+
+        assertThat(texto).contains("Costo unitario").contains("Proveedor autorizado");
+    }
+
+    @Test
+    @DisplayName("a legacy .ppt gives up its slide titles")
+    void extractsTheSlidesOfALegacyPresentation() {
+        byte[] file = binarioViejo(true, "Induccion de seguridad", "Uso de proteccion personal");
+
+        String texto = extractor.extract(file, "induccion.ppt");
+
+        assertThat(texto).contains("Induccion de seguridad").contains("Uso de proteccion personal");
+    }
+
+    @Test
+    @DisplayName("the container's own stream names never reach the index")
+    void skipsTheStructuralNamesOfTheContainer() {
+        // "Root Entry" y "WordDocument" estan dentro de todos los .doc del mundo: indexarlos haria
+        // que buscar cualquiera de esas palabras devolviera el catalogo entero.
+        byte[] file = binarioViejo(true, "Root Entry", "WordDocument", "Acta de reunion");
+
+        String texto = extractor.extract(file, "acta.doc");
+
+        assertThat(texto).isEqualTo("Acta de reunion");
+    }
+
+    @Test
+    @DisplayName("noise too short or without letters is not text")
+    void ignoresRunsThatAreNotWords() {
+        byte[] file = binarioViejo(true, "ab", "12.5", "Informe final");
+
+        String texto = extractor.extract(file, "informe.doc");
+
+        // "ab" queda por debajo del minimo y "12.5" no tiene una sola letra: los dos salen del
+        // formato, no del documento.
+        assertThat(texto).isEqualTo("Informe final");
+    }
+
+    @Test
+    @DisplayName("a repeated heading is indexed once instead of on every row")
+    void keepsEachStringOnlyOnce() {
+        byte[] file = binarioViejo(false, "Cantidad", "Cantidad", "Cantidad", "Total general");
+
+        String texto = extractor.extract(file, "planilla.xls");
+
+        assertThat(texto).isEqualTo("Cantidad Total general");
+    }
+
+    @Test
+    @DisplayName("an .xlsb is opened as the ZIP it really is")
+    void extractsTheStringsOfAnXlsb() throws Exception {
+        // El .xlsb no es OLE2 sino un ZIP con partes binarias: buscar texto en los bytes
+        // comprimidos no daria nada, hay que entrar al contenedor primero.
+        byte[] file = xlsb("Presupuesto 2026", "Centro de costos");
+
+        String texto = extractor.extract(file, "presupuesto.xlsb");
+
+        assertThat(texto).contains("Presupuesto 2026").contains("Centro de costos");
+    }
+
+    @Test
+    @DisplayName("a legacy binary with nothing readable is stored as null")
+    void storesNullForALegacyBinaryWithoutText() {
+        assertThat(extractor.extract(new byte[] { 0, 1, 2, 3, 4, 5, 6, 7 }, "vacio.doc")).isNull();
+    }
+
+    // ── .rtf ─────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("an RTF gives up its text without its control codes")
+    void readsAnRtfWithoutItsControlCodes() {
+        String texto = extractor.extract(RTF.getBytes(StandardCharsets.ISO_8859_1), "informe.rtf");
+
+        assertThat(texto).contains("Informe de calidad")
+                .contains("Resultado: aprobado")
+                .doesNotContain("rtf1")
+                .doesNotContain("pard")
+                .doesNotContain("fs24");
+    }
+
+    @Test
+    @DisplayName("the font and color tables of an RTF are not its content")
+    void dropsTheFormatTablesOfAnRtf() {
+        // Tratado como texto plano, cada .rtf metia al indice sus fuentes y sus colores: buscar
+        // "Arial" devolvia todos los documentos del sistema.
+        String texto = extractor.extract(RTF.getBytes(StandardCharsets.ISO_8859_1), "informe.rtf");
+
+        assertThat(texto).doesNotContain("Arial")
+                .doesNotContain("Times New Roman")
+                .doesNotContain("Riched20");
+    }
+
+    @Test
+    @DisplayName("RTF accents come back as the letters they represent")
+    void decodesTheAccentsOfAnRtf() {
+        // Un apellido con tilde es justamente lo que alguien escribe en el buscador.
+        String texto = extractor.extract(RTF.getBytes(StandardCharsets.ISO_8859_1), "informe.rtf");
+
+        assertThat(texto).contains("José Pérez").contains("Medición de espesor");
     }
 
     @Test

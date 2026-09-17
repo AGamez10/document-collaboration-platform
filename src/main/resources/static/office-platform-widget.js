@@ -4658,7 +4658,8 @@
       message: isSharedTrashItem(file)
         ? '"' + file.originalFileName + '" dejará de estar compartido con vos. El archivo original '
           + 'no se toca: su autor lo conserva.'
-        : 'Esta acción no se puede deshacer. "' + file.originalFileName + '" se eliminará permanentemente.',
+        : '"' + file.originalFileName + '" saldrá de tu papelera y no vas a poder recuperarlo '
+          + 'por tu cuenta. Queda registrado: si fue un error, un administrador puede devolvértelo.',
       confirmLabel: 'Eliminar permanentemente',
       danger: true,
       onConfirm: function () {
@@ -4679,7 +4680,8 @@
     if (ids.length === 0) return;
     showModal({
       title: 'Eliminar permanentemente',
-      message: 'Esta acción no se puede deshacer. Se eliminarán permanentemente ' + ids.length + ' archivo(s).',
+      message: 'Se quitarán de tu papelera ' + ids.length + ' archivo(s) y no vas a poder '
+        + 'recuperarlos por tu cuenta. Si fue un error, un administrador puede devolvértelos.',
       confirmLabel: 'Eliminar permanentemente',
       danger: true,
       onConfirm: function () {

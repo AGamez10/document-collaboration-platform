@@ -87,6 +87,20 @@ public class FileEntity {
     private LocalDateTime deletedAt;
 
     /**
+     * Momento en que el propietario vacio el archivo de su papelera.
+     *
+     * <p>Es el segundo nivel de la papelera. Con {@code deletedAt} el archivo sale de "Mis
+     * archivos" y queda en la papelera de su dueño; con esta columna sale tambien de esa papelera
+     * y solo lo ve el panel de administracion. La fila y el binario siguen existiendo: el unico
+     * borrado fisico es el que ejecuta el administrador.
+     *
+     * <p>Antes este vaciado destruia la fila y el objeto de MinIO en el acto, y con ellos toda
+     * posibilidad de auditar o recuperar lo que alguien borro por error.
+     */
+    @Column(name = "user_purged_at")
+    private LocalDateTime userPurgedAt;
+
+    /**
      * Texto extraido del documento, para poder buscarlo por su contenido.
      *
      * <p>Anulable y sin indexar al vuelo: los archivos anteriores a esta columna lo tienen en null

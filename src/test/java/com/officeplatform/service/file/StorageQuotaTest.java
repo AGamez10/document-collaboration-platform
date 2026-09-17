@@ -32,7 +32,6 @@ import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.activity.ActivityLogRecorder;
 import com.officeplatform.service.storage.StorageService;
-import com.officeplatform.service.version.FileVersionService;
 
 /**
  * The per-project storage quota.
@@ -55,7 +54,6 @@ class StorageQuotaTest {
     @Mock private FolderRepository folderRepository;
     @Mock private SharePermissionRepository sharePermissionRepository;
     @Mock private StorageService storageService;
-    @Mock private FileVersionService fileVersionService;
     @Mock private com.officeplatform.service.search.FileIndexingService fileIndexingService;
     @Mock private ActivityLogRecorder activityLogRecorder;
 
@@ -76,7 +74,7 @@ class StorageQuotaTest {
         });
 
         service = new FileServiceImpl(fileRepository, apiKeyRepository, folderRepository,
-                sharePermissionRepository, storageService, fileVersionService, fileIndexingService, activityLogRecorder,
+                sharePermissionRepository, storageService, fileIndexingService, activityLogRecorder,
                 "office-platform",
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     }

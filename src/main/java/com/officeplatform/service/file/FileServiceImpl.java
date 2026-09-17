@@ -34,7 +34,6 @@ import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.activity.ActivityLogRecorder;
 import com.officeplatform.service.storage.StorageService;
 import com.officeplatform.service.search.FileIndexingService;
-import com.officeplatform.service.version.FileVersionService;
 import com.officeplatform.util.DocxUtils;
 import com.officeplatform.util.FileUtils;
 import com.officeplatform.util.MimeUtils;
@@ -69,7 +68,6 @@ public class FileServiceImpl implements FileService {
     private final FolderRepository folderRepository;
     private final SharePermissionRepository sharePermissionRepository;
     private final StorageService storageService;
-    private final FileVersionService fileVersionService;
     private final FileIndexingService fileIndexingService;
     private final ActivityLogRecorder activityLogRecorder;
     private final String bucket;
@@ -81,7 +79,6 @@ public class FileServiceImpl implements FileService {
             FolderRepository folderRepository,
             SharePermissionRepository sharePermissionRepository,
             StorageService storageService,
-            FileVersionService fileVersionService,
             FileIndexingService fileIndexingService,
             ActivityLogRecorder activityLogRecorder,
             @Value("${office-platform.storage.minio.bucket}") String bucket,
@@ -91,7 +88,6 @@ public class FileServiceImpl implements FileService {
         this.folderRepository = folderRepository;
         this.sharePermissionRepository = sharePermissionRepository;
         this.storageService = storageService;
-        this.fileVersionService = fileVersionService;
         this.fileIndexingService = fileIndexingService;
         this.activityLogRecorder = activityLogRecorder;
         this.bucket = bucket;
@@ -206,17 +202,21 @@ public class FileServiceImpl implements FileService {
         // Decentralized like "Mis archivos": the trash follows the person across projects, so
         // apiKeyId is not part of the filter. Ownership still is — the queries below only ever
         // match rows this user authored or owns.
+        // Las tres consultas excluyen lo que esta persona ya vacio: para ella el archivo dejo de
+        // existir. La fila sigue viva y visible en el panel de administracion, que es justamente
+        // lo que permite auditarlo o devolverselo si se arrepiente.
         if (resolvedUserId != null) {
-            fileRepository.findAllByCreatedByUserIdAndDeletedAtIsNotNull(resolvedUserId)
+            fileRepository.findAllByCreatedByUserIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(resolvedUserId)
                     .forEach(file -> byId.put(file.getId(), file));
             // Legacy private rows: owned through user_id, created before created_by_user_id existed.
-            fileRepository.findAllByUserIdAndDeletedAtIsNotNull(resolvedUserId)
+            fileRepository.findAllByUserIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(resolvedUserId)
                     .forEach(file -> byId.putIfAbsent(file.getId(), file));
         }
 
         if (resolvedUserName != null) {
             fileRepository
-                    .findAllByCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNull(resolvedUserName)
+                    .findAllByCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNullAndUserPurgedAtIsNull(
+                            resolvedUserName)
                     .forEach(file -> byId.putIfAbsent(file.getId(), file));
         }
 
@@ -551,8 +551,9 @@ public class FileServiceImpl implements FileService {
     @Override
     @Transactional
     public FileEntity restoreFile(Long fileId, Long apiKeyId, String userId, String userName) {
-        FileEntity fileEntity = fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNotNull(fileId, apiKeyId)
-            .or(() -> fileRepository.findByIdAndDeletedAtIsNotNull(fileId))
+        FileEntity fileEntity = fileRepository
+            .findByIdAndApiKeyIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(fileId, apiKeyId)
+            .or(() -> fileRepository.findByIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(fileId))
             .orElseThrow(() -> new FileNotFoundException(fileId));
 
         fileEntity.setDeletedAt(null);
@@ -562,21 +563,35 @@ public class FileServiceImpl implements FileService {
         return saved;
     }
 
+    /**
+     * Vacia el archivo de la papelera de su dueño sin destruirlo.
+     *
+     * <p>Esto era un borrado fisico: se iba la fila y el binario de MinIO en el mismo acto, y con
+     * ellos el archivo desaparecia tambien de la papelera del panel de administracion. El error
+     * mas caro del sistema era el mas facil de cometer, y no habia forma de auditarlo ni de
+     * deshacerlo.
+     *
+     * <p>Ahora el vaciado es una segunda ocultacion: el archivo sale de la papelera del usuario y
+     * queda unicamente a la vista del administrador, con su binario y su historial de versiones
+     * intactos. El borrado fisico existe, pero es potestad exclusiva de
+     * {@code DELETE /api/admin/files/&#123;id&#125;/purge}.
+     */
     @Override
     @Transactional
     public void purgeFile(Long fileId, Long apiKeyId, String userId, String userName) {
-        FileEntity fileEntity = fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNotNull(fileId, apiKeyId)
-            .or(() -> fileRepository.findByIdAndDeletedAtIsNotNull(fileId))
+        FileEntity fileEntity = fileRepository
+            .findByIdAndApiKeyIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(fileId, apiKeyId)
+            .or(() -> fileRepository.findByIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(fileId))
             .orElseThrow(() -> new FileNotFoundException(fileId));
 
-        // El historial se va con el archivo: dejarlo huerfano acumularia binarios que nadie puede
-        // volver a alcanzar, porque la unica via de acceso era la fila que se esta borrando.
-        fileVersionService.purgeVersions(fileEntity.getId());
+        fileEntity.setUserPurgedAt(LocalDateTime.now());
+        FileEntity saved = fileRepository.save(fileEntity);
 
-        storageService.delete(fileEntity.getObjectName());
-        fileRepository.delete(fileEntity);
         activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.PURGE,
-                fileEntity.getId(), fileEntity.getOriginalFileName(), null, fileEntity.getFolderId());
+                saved.getId(), saved.getOriginalFileName(),
+                "Vaciado de la papelera del usuario. El archivo se conserva en la papelera del "
+                        + "panel de administracion hasta que un administrador lo borre.",
+                saved.getFolderId());
     }
 
     @Override

@@ -87,6 +87,7 @@ public class AdminServiceImpl implements AdminService {
     private final ActivityLogRecorder activityLogRecorder;
     private final BackupService backupService;
     private final com.officeplatform.service.search.FileIndexingService fileIndexingService;
+    private final com.officeplatform.service.version.FileVersionService fileVersionService;
     private final int onlyOfficeMaxConnections;
     private final long storageLimit;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -104,6 +105,7 @@ public class AdminServiceImpl implements AdminService {
             ActivityLogRecorder activityLogRecorder,
             BackupService backupService,
             com.officeplatform.service.search.FileIndexingService fileIndexingService,
+            com.officeplatform.service.version.FileVersionService fileVersionService,
             @Value("${office-platform.onlyoffice.max-connections}") int onlyOfficeMaxConnections,
             @Value("${office-platform.storage.max-total-size}") long storageLimit) {
         this.fileRepository = fileRepository;
@@ -118,6 +120,7 @@ public class AdminServiceImpl implements AdminService {
         this.activityLogRecorder = activityLogRecorder;
         this.backupService = backupService;
         this.fileIndexingService = fileIndexingService;
+        this.fileVersionService = fileVersionService;
         this.onlyOfficeMaxConnections = onlyOfficeMaxConnections;
         this.storageLimit = storageLimit;
     }
@@ -433,17 +436,56 @@ public class AdminServiceImpl implements AdminService {
                 || hasText(fileEntity.getUserId())
                 || hasText(fileEntity.getCreatedByName());
 
+        // Se limpian los dos niveles de la papelera. Devolver el archivo solo al primero tenía
+        // sentido cuando el vaciado del usuario lo destruía: ya no queda nada que el dueño pueda
+        // deshacer por su cuenta, así que dejarlo a medio camino sería pedirle un paso que no
+        // puede dar sobre algo que su papelera no muestra.
+        boolean vaciadoPorElUsuario = fileEntity.getUserPurgedAt() != null;
+        fileEntity.setDeletedAt(null);
+        fileEntity.setUserPurgedAt(null);
+
+        // La carpeta que lo contenía puede seguir en la papelera o haber desaparecido con ella:
+        // un archivo vivo dentro de una carpeta muerta no aparece en ningún listado. Se ancla en
+        // el primer ancestro vivo, con la raíz como último recurso, igual que al restaurar una
+        // carpeta.
+        Long anchor = firstLivingFolder(fileEntity.getFolderId());
+        boolean reparented = !java.util.Objects.equals(anchor, fileEntity.getFolderId());
+        fileEntity.setFolderId(anchor);
+
         fileEntity.setUpdatedByName("Admin");
         FileEntity saved = fileRepository.save(fileEntity);
 
-        String details = reachable
-                ? "Devuelto a la papelera del usuario desde el panel de administración. "
-                        + "La restauración final la hace su dueño."
-                : "Devuelto a la papelera desde el panel de administración, pero el archivo no tiene "
-                        + "autor asignado: nadie lo verá en su papelera hasta que se le asigne uno.";
+        StringBuilder details = new StringBuilder(vaciadoPorElUsuario
+                ? "Restaurado desde el panel de administración después de que su dueño lo vaciara "
+                        + "de la papelera."
+                : "Restaurado desde el panel de administración.");
+        if (!reachable) {
+            details.append(" El archivo no tiene autor asignado: nadie lo verá entre sus archivos "
+                    + "hasta que se le asigne uno.");
+        }
+        if (reparented) {
+            details.append(" Su carpeta ya no existía, así que quedó en la raíz.");
+        }
 
         activityLogRecorder.record(saved.getApiKeyId(), "admin", "Administrador", ActivityAction.RESTORE,
-                saved.getId(), saved.getOriginalFileName(), details, saved.getFolderId());
+                saved.getId(), saved.getOriginalFileName(), details.toString(), saved.getFolderId());
+    }
+
+    /** Primera carpeta viva subiendo por la cadena de padres, o null para anclar en la raíz. */
+    private Long firstLivingFolder(Long folderId) {
+        Long current = folderId;
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        while (current != null && seen.add(current)) {
+            FolderEntity folder = folderRepository.findById(current).orElse(null);
+            if (folder == null) {
+                return null;
+            }
+            if (folder.getDeletedAt() == null) {
+                return folder.getId();
+            }
+            current = folder.getParentId();
+        }
+        return null;
     }
 
     /**
@@ -477,13 +519,30 @@ public class AdminServiceImpl implements AdminService {
         return value != null && !value.isBlank();
     }
 
+    /**
+     * Borra el archivo de verdad: la fila, sus versiones y los binarios de MinIO.
+     *
+     * <p>Es el unico punto del sistema que destruye datos. El vaciado que hace el usuario desde su
+     * papelera ya no borra nada: oculta el archivo y lo deja aca, para que alguien con potestad de
+     * auditar decida si se va o si vuelve.
+     */
     @Override
     @Transactional
     public void purgeFile(Long fileId) {
         FileEntity fileEntity = fileRepository.findByIdAndDeletedAtIsNotNull(fileId)
                 .orElseThrow(() -> new FileNotFoundException(fileId));
 
-        storageService.delete(fileEntity.getObjectName());
+        // El historial se va con el archivo: dejarlo huerfano acumularia binarios que nadie puede
+        // volver a alcanzar, porque la unica via de acceso era la fila que se esta borrando.
+        fileVersionService.purgeVersions(fileEntity.getId());
+
+        // El binario se borra fuera de la fila: si el objeto ya no esta en el almacenamiento, la
+        // fila igual debe irse, o la papelera del panel nunca queda limpia.
+        try {
+            storageService.delete(fileEntity.getObjectName());
+        } catch (Exception e) {
+            log.warn("No se pudo borrar el binario {}: {}", fileEntity.getObjectName(), e.getMessage());
+        }
         fileRepository.delete(fileEntity);
 
         activityLogRecorder.record(fileEntity.getApiKeyId(), "admin", "Administrador", ActivityAction.PURGE,
@@ -813,7 +872,8 @@ public class AdminServiceImpl implements AdminService {
                 buildFolderPath(entity.getFolderId(), foldersById),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt(),
-                entity.getDeletedAt());
+                entity.getDeletedAt(),
+                entity.getUserPurgedAt());
     }
 
 

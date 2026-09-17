@@ -32,7 +32,6 @@ import com.officeplatform.repository.FolderRepository;
 import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.activity.ActivityLogRecorder;
 import com.officeplatform.service.storage.StorageService;
-import com.officeplatform.service.version.FileVersionService;
 
 /**
  * Reaching a file that somebody else shared with you.
@@ -58,7 +57,6 @@ class SharedFileLookupTest {
     @Mock private FolderRepository folderRepository;
     @Mock private SharePermissionRepository shareRepository;
     @Mock private StorageService storageService;
-    @Mock private FileVersionService fileVersionService;
     @Mock private com.officeplatform.service.search.FileIndexingService fileIndexingService;
     @Mock private ActivityLogRecorder activityLogRecorder;
 
@@ -84,7 +82,7 @@ class SharedFileLookupTest {
                         .toList());
 
         service = new FileServiceImpl(fileRepository, apiKeyRepository, folderRepository,
-                shareRepository, storageService, fileVersionService, fileIndexingService, activityLogRecorder,
+                shareRepository, storageService, fileIndexingService, activityLogRecorder,
                 "office-platform", "application/pdf");
     }
 

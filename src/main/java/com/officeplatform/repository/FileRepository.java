@@ -54,6 +54,18 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     Optional<FileEntity> findByIdAndApiKeyIdAndDeletedAtIsNotNull(Long id, Long apiKeyId);
 
     /**
+     * Las dos busquedas que usa la papelera del usuario para restaurar y vaciar.
+     *
+     * <p>Excluyen lo ya vaciado por su dueño: esas filas siguen existiendo, pero para el usuario
+     * el archivo ya no esta. Sin este filtro podria restaurar o volver a vaciar algo que su
+     * papelera no muestra, y el vaciado dejaria de ser una operacion con efecto visible.
+     */
+    Optional<FileEntity> findByIdAndApiKeyIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(
+            Long id, Long apiKeyId);
+
+    Optional<FileEntity> findByIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(Long id);
+
+    /**
      * Lookup that also matches trashed files. Permission resolution must work on trashed
      * resources: restore and purge operate precisely on files whose deletedAt is not null,
      * so a lookup restricted to DeletedAtIsNull can never authorize them.
@@ -76,6 +88,20 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     List<FileEntity> findAllByCreatedByUserIdAndDeletedAtIsNotNull(String createdByUserId);
 
     List<FileEntity> findAllByCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNull(String createdByName);
+
+    /**
+     * Las tres consultas que arman la papelera del usuario, sin lo que el ya vacio.
+     *
+     * <p>Son las mismas de arriba con un filtro mas. Las versiones sin filtrar siguen existiendo
+     * porque el panel de administracion necesita ver justamente lo que aca se oculta.
+     */
+    List<FileEntity> findAllByUserIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(String userId);
+
+    List<FileEntity> findAllByCreatedByUserIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(
+            String createdByUserId);
+
+    List<FileEntity> findAllByCreatedByUserIdIsNullAndCreatedByNameAndDeletedAtIsNotNullAndUserPurgedAtIsNull(
+            String createdByName);
 
     /**
      * Lookup by id that is not scoped to a project.
@@ -148,8 +174,14 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     long countByApiKeyIdAndDeletedAtIsNull(Long apiKeyId);
 
 
-    /** Archivos de una carpeta que estan en la papelera, para restaurarlos con ella. */
-    List<FileEntity> findAllByFolderIdAndDeletedAtIsNotNull(Long folderId);
+    /**
+     * Archivos de una carpeta que estan en la papelera, para restaurarlos con ella.
+     *
+     * <p>Excluye los que el usuario ya vacio: volvieron a la papelera por arrastre de la carpeta,
+     * pero despues fueron vaciados uno por uno. Restaurar la carpeta no puede deshacer esa
+     * decision; para eso esta el panel de administracion.
+     */
+    List<FileEntity> findAllByFolderIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(Long folderId);
 
     /** Todos los archivos de una carpeta, vivos o en papelera, para purgar el arbol. */
     List<FileEntity> findAllByFolderId(Long folderId);

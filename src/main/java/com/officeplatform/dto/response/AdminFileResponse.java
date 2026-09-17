@@ -35,4 +35,12 @@ public class AdminFileResponse {
 
     private LocalDateTime deletedAt;
 
+    /**
+     * Momento en que el dueño vacio el archivo de su propia papelera.
+     *
+     * <p>Con valor, el archivo ya no existe para el usuario y solo se lo ve desde aca: es el
+     * estado en el que mas importa que el panel muestre por que nadie mas lo encuentra.
+     */
+    private LocalDateTime userPurgedAt;
+
 }

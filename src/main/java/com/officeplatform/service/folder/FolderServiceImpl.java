@@ -205,7 +205,8 @@ public class FolderServiceImpl implements FolderService {
             folderRepository.save(node);
             // Los archivos vuelven con la carpeta: fueron a la papelera por arrastre, no por
             // decisión propia, así que restaurarlos por separado sería trabajo manual inventado.
-            List<FileEntity> files = fileRepository.findAllByFolderIdAndDeletedAtIsNotNull(node.getId());
+            List<FileEntity> files =
+                    fileRepository.findAllByFolderIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(node.getId());
             for (FileEntity file : files) {
                 file.setDeletedAt(null);
             }
@@ -219,7 +220,15 @@ public class FolderServiceImpl implements FolderService {
         return folder;
     }
 
-    /** Elimina definitivamente una carpeta de la papelera, con su subárbol y sus binarios. */
+    /**
+     * Vacía una carpeta de la papelera del usuario junto con su subárbol.
+     *
+     * <p>Las carpetas sí desaparecen: son estructura, no contenido, y el panel de administración
+     * trabaja sobre archivos. Los archivos, en cambio, se marcan como vaciados por su dueño y
+     * conservan fila y binario, igual que al vaciarlos de a uno. De lo contrario bastaría con
+     * purgar la carpeta que los contiene para esquivar la retención entera, que es precisamente
+     * el camino que sigue el botón "Vaciar papelera" del gestor.
+     */
     @Override
     @Transactional
     public void purgeFolder(Long folderId, Long apiKeyId, String userId, String userName) {
@@ -228,24 +237,30 @@ public class FolderServiceImpl implements FolderService {
 
         List<FolderEntity> tree = collectDeletedTree(folder);
         String name = folder.getName();
-        int purged = 0;
+        LocalDateTime now = LocalDateTime.now();
+        int retenidos = 0;
         for (FolderEntity node : tree) {
-            for (FileEntity file : fileRepository.findAllByFolderId(node.getId())) {
-                // El binario se borra fuera de la fila: si el objeto ya no está en el
-                // almacenamiento, la fila igual debe irse, o la papelera nunca queda limpia.
-                try {
-                    storageService.delete(file.getObjectName());
-                } catch (Exception e) {
-                    log.warn("No se pudo borrar el binario {}: {}", file.getObjectName(), e.getMessage());
+            List<FileEntity> files = fileRepository.findAllByFolderId(node.getId());
+            for (FileEntity file : files) {
+                // Un archivo vivo dentro de una carpeta que se va también queda fuera de alcance:
+                // se lo manda a la papelera antes de vaciarlo, o quedaría marcado como vaciado sin
+                // haber estado nunca borrado.
+                if (file.getDeletedAt() == null) {
+                    file.setDeletedAt(now);
                 }
-                fileRepository.delete(file);
-                purged++;
+                if (file.getUserPurgedAt() == null) {
+                    file.setUserPurgedAt(now);
+                    retenidos++;
+                }
             }
+            fileRepository.saveAll(files);
         }
         folderRepository.deleteAll(tree);
 
         activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.PURGE,
-                null, name, "Carpeta eliminada definitivamente. Archivos borrados: " + purged, null);
+                null, name,
+                "Carpeta eliminada definitivamente. Archivos conservados en la papelera del panel "
+                        + "de administración: " + retenidos, null);
     }
 
     /** Primer ancestro que no esté en la papelera, o null si hay que anclar en la raíz. */

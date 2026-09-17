@@ -86,7 +86,7 @@ class FolderTrashTest {
 
         lenient().when(fileRepository.findAllByApiKeyIdAndFolderIdAndDeletedAtIsNull(anyLong(), anyLong()))
                 .thenAnswer(i -> filesOf(i.getArgument(1), false));
-        lenient().when(fileRepository.findAllByFolderIdAndDeletedAtIsNotNull(anyLong()))
+        lenient().when(fileRepository.findAllByFolderIdAndDeletedAtIsNotNullAndUserPurgedAtIsNull(anyLong()))
                 .thenAnswer(i -> filesOf(i.getArgument(0), true));
         lenient().when(fileRepository.findAllByFolderId(anyLong()))
                 .thenAnswer(i -> filesOf(i.getArgument(0), null));
@@ -220,8 +220,8 @@ class FolderTrashTest {
     // ── purga ────────────────────────────────────────────────────────────────
 
     @Test
-    @DisplayName("purging a folder removes its subtree, its files and their binaries")
-    void purgesTheWholeTree() {
+    @DisplayName("purging a folder removes its subtree but keeps its files for the admin")
+    void purgesTheTreeAndRetainsTheFiles() {
         folder(1L, null, "Informes");
         folder(2L, 1L, "Semana 36");
         file(10L, 2L, "informe.docx");
@@ -229,26 +229,30 @@ class FolderTrashTest {
 
         service.purgeFolder(1L, API_KEY, "111", "Ana");
 
-        verify(storageService).delete("obj-10");
-        verify(fileRepository).delete(files.get(10L));
+        // Las carpetas sí se van: son estructura, y el panel de administración trabaja sobre
+        // archivos. Los archivos, en cambio, se retienen igual que al vaciarlos de a uno; si no,
+        // bastaría con purgar la carpeta contenedora para esquivar la retención entera.
         verify(folderRepository).deleteAll(any());
+        verify(fileRepository, org.mockito.Mockito.never()).delete(any(FileEntity.class));
+        verify(storageService, org.mockito.Mockito.never()).delete(anyString());
+        assertThat(files.get(10L).getUserPurgedAt()).isNotNull();
+        assertThat(files.get(10L).getDeletedAt()).isNotNull();
     }
 
     @Test
-    @DisplayName("a binary already gone from storage does not block emptying the trash")
-    void purgesEvenIfTheBinaryIsAlreadyGone() {
+    @DisplayName("a live file inside a purged folder is trashed before being retained")
+    void trashesALiveFileBeforeRetainingIt() {
         folder(1L, null, "Informes");
-        file(10L, 1L, "perdido.docx");
+        file(10L, 1L, "vivo.docx");
+        // La carpeta va a la papelera arrastrando sus archivos, pero uno creado después seguiría
+        // vivo: marcarlo como vaciado sin haberlo borrado lo dejaría en un estado imposible.
         service.deleteFolder(1L, API_KEY, "111", "Ana");
-        org.mockito.Mockito.doThrow(new RuntimeException("no está en MinIO"))
-                .when(storageService).delete("obj-10");
+        files.get(10L).setDeletedAt(null);
 
         service.purgeFolder(1L, API_KEY, "111", "Ana");
 
-        // La fila se va igual: si un objeto perdido pudiera frenar la purga, la papelera
-        // quedaría imposible de vaciar, que es exactamente el síntoma reportado.
-        verify(fileRepository).delete(files.get(10L));
-        verify(folderRepository).deleteAll(any());
+        assertThat(files.get(10L).getDeletedAt()).isNotNull();
+        assertThat(files.get(10L).getUserPurgedAt()).isNotNull();
     }
 
     @Test
