@@ -29,7 +29,7 @@ import com.officeplatform.dto.request.PortalLoginRequest;
 import com.officeplatform.dto.response.PortalLoginResponse;
 import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.PortalUserEntity;
-import com.officeplatform.exception.ShareAccessDeniedException;
+import com.officeplatform.exception.InvalidCredentialsException;
 import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.PortalUserRepository;
 import com.officeplatform.security.widget.WidgetTokenService;
@@ -112,7 +112,7 @@ class PortalAuthServiceTest {
         when(portalUserRepository.saveAndFlush(any())).thenAnswer(inv -> inv.getArgument(0));
 
         assertThatThrownBy(() -> service.login(new PortalLoginRequest(CEDULA, "otra-clave", null)))
-                .isInstanceOf(ShareAccessDeniedException.class);
+                .isInstanceOf(InvalidCredentialsException.class);
     }
 
     @Test
@@ -136,7 +136,7 @@ class PortalAuthServiceTest {
                 .thenReturn(Optional.of(storedUser("Segura2026", false)));
 
         assertThatThrownBy(() -> service.login(new PortalLoginRequest(CEDULA, "incorrecta", null)))
-                .isInstanceOf(ShareAccessDeniedException.class);
+                .isInstanceOf(InvalidCredentialsException.class);
         verify(widgetTokenService, never()).generateToken(anyString(), anyString(), anyLong());
     }
 
@@ -206,7 +206,7 @@ class PortalAuthServiceTest {
         // Otherwise knowing a cédula would be enough to take over an unused account.
         assertThatThrownBy(() -> service.changePassword(
                 new PortalChangePasswordRequest(CEDULA, "adivinada", "Plastitec2026")))
-                .isInstanceOf(ShareAccessDeniedException.class);
+                .isInstanceOf(InvalidCredentialsException.class);
     }
 
 }

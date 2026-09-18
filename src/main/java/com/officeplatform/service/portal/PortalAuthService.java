@@ -13,7 +13,7 @@ import com.officeplatform.dto.request.PortalLoginRequest;
 import com.officeplatform.dto.response.PortalLoginResponse;
 import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.PortalUserEntity;
-import com.officeplatform.exception.ShareAccessDeniedException;
+import com.officeplatform.exception.InvalidCredentialsException;
 import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.PortalUserRepository;
 import com.officeplatform.security.widget.WidgetTokenService;
@@ -80,7 +80,7 @@ public class PortalAuthService {
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             // Same message whether the account exists or not: telling them apart would turn this
             // endpoint into a way of discovering which cédulas are registered.
-            throw new ShareAccessDeniedException("Cédula o contraseña incorrecta.");
+            throw new InvalidCredentialsException("Cédula o contraseña incorrecta.");
         }
 
         // Belt and braces: a stored hash that still matches the provisional password forces the
@@ -114,10 +114,10 @@ public class PortalAuthService {
         }
 
         PortalUserEntity user = portalUserRepository.findByCedula(cedula)
-                .orElseThrow(() -> new ShareAccessDeniedException("Cédula o contraseña incorrecta."));
+                .orElseThrow(() -> new InvalidCredentialsException("Cédula o contraseña incorrecta."));
 
         if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
-            throw new ShareAccessDeniedException("Cédula o contraseña incorrecta.");
+            throw new InvalidCredentialsException("Cédula o contraseña incorrecta.");
         }
 
         validateNewPassword(request.getNewPassword());

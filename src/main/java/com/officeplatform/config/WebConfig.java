@@ -13,12 +13,19 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addViewControllers(ViewControllerRegistry registry) {
-        registry.addViewController("/admin").setViewName("forward:/admin/index.html");
-        registry.addViewController("/admin/").setViewName("forward:/admin/index.html");
+        // La barra final no es un detalle estético: decide contra qué resuelve el navegador
+        // cualquier ruta relativa de la página. Servida en /portal, una hoja de estilos escrita
+        // como "portal.css" se pide a /portal.css —fuera del directorio y fuera de lo permitido—
+        // y la página aparece sin estilos ni scripts. Redirigir primero deja una sola URL
+        // canónica y cierra esa clase de error de raíz; los enlaces absolutos del HTML son el
+        // segundo cinturón.
+        registry.addRedirectViewController("/admin", "/admin/");
+        registry.addRedirectViewController("/portal", "/portal/");
+
         // Spring solo resuelve index.html automáticamente en la raíz, no en subdirectorios:
         // sin esto, /portal/ responde NoResourceFoundException y el usuario tendría que
         // escribir /portal/index.html a mano.
-        registry.addViewController("/portal").setViewName("forward:/portal/index.html");
+        registry.addViewController("/admin/").setViewName("forward:/admin/index.html");
         registry.addViewController("/portal/").setViewName("forward:/portal/index.html");
     }
 

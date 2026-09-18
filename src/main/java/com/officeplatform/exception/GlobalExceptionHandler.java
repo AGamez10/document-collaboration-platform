@@ -177,6 +177,38 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(response);
     }
 
+    /**
+     * Un login que falla responde 401, no 403.
+     *
+     * <p>Los dos códigos dicen cosas distintas: 403 es "sé quién sos y no te alcanza", 401 es "no
+     * sé quién sos". El portal devolvía 403 ante una contraseña equivocada, indistinguible del 403
+     * que Spring Security da cuando una ruta no está permitida — y eso mandaba a buscar el
+     * problema a la configuración de seguridad en vez de a la credencial escrita.
+     */
+    @ExceptionHandler(InvalidCredentialsException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidCredentialsException(
+            InvalidCredentialsException ex, HttpServletRequest request) {
+
+        ErrorResponse error = ErrorResponse.builder()
+            .code("INVALID_CREDENTIALS")
+            .details(ex.getMessage())
+            .path(request.getRequestURI())
+            .timestamp(System.currentTimeMillis() / 1000)
+            .build();
+
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+            .success(false)
+            .timestamp(LocalDateTime.now())
+            .message(ex.getMessage())
+            .metadata(Map.of("error", error))
+            .build();
+
+        // Sin la cédula en la traza: el intento fallido se registra, pero el registro no puede
+        // convertirse en una lista de credenciales probadas.
+        log.warn("Credenciales inválidas en {}", request.getRequestURI());
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+    }
+
     @ExceptionHandler(ShareAccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleShareAccessDeniedException(
             ShareAccessDeniedException ex, HttpServletRequest request) {
