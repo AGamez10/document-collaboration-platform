@@ -2010,6 +2010,36 @@
    * devolvería 401. El tipo importa tanto como los bytes — un Blob sin type no lo reproduce
    * ningún <video> —, y el backend ya resuelve el canónico desde la extensión (MimeUtils).
    */
+  /**
+   * Pide una copia propia de un archivo.
+   *
+   * <p>Mover un documento del espacio compartido a "Mis archivos" se lo sacaba al equipo entero;
+   * el backend ahora rechaza ese movimiento y esta es la salida. La copia cae donde la persona
+   * está parada: su carpeta actual, o su espacio si está en la raíz.
+   */
+  async function copyFile(id) {
+    const query = [];
+    const folderId = state.currentFolderId;
+    if (folderId) query.push('folderId=' + encodeURIComponent(folderId));
+    query.push('scope=' + encodeURIComponent(getCurrentScope()));
+    const res = await apiFetch('/api/files/' + id + '/copy?' + query.join('&'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ folderId: folderId || null }),
+    });
+    const j = await res.json();
+    return j.data;
+  }
+
+  function handleCopy(file) {
+    copyFile(file.id).then(function (copia) {
+      toast('Copia creada: ' + ((copia && copia.originalFileName) || file.originalFileName), 'success');
+      return loadFiles();
+    }).catch(function (err) {
+      toast('No se pudo copiar: ' + err.message, 'error');
+    });
+  }
+
   async function downloadFileBlob(id) {
     const res = await apiFetch('/api/files/' + id + '/download');
     return res.blob();
@@ -4172,6 +4202,7 @@
       menuItem('Descargar', ICONS.download, false, function () { downloadSingle(file.id, file.originalFileName); }),
       menuItem('Renombrar', ICONS.rename, false, function () { handleRename(file); }),
       menuItem('Mover', ICONS.move, false, function () { showMovePicker(file); }),
+      menuItem('Hacer una copia', ICONS.upload, false, function () { handleCopy(file); }),
     ];
     // Las macros VBA solo corren en Excel de escritorio, así que la puerta a esa app va donde
     // el usuario ya está mirando el archivo, no escondida dentro del editor.

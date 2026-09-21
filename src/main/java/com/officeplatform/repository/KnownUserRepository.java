@@ -19,6 +19,15 @@ public interface KnownUserRepository extends JpaRepository<KnownUserEntity, Long
 
     List<KnownUserEntity> findAllByApiKeyId(Long apiKeyId);
 
+    /**
+     * Todas las inscripciones de una misma cédula, en cualquier proyecto.
+     *
+     * <p>El rol es de la persona y no del proyecto: {@code updateUserRole} lo propaga a todas sus
+     * filas. Esta consulta permite que una inscripción nueva herede lo que ya se decidió sobre
+     * ella en lugar de nacer siempre como usuario común.
+     */
+    List<KnownUserEntity> findAllByUserId(String userId);
+
     // Autocomplete for the share modal: match by display name (LIKE %term%, case-insensitive).
     List<KnownUserEntity> findAllByApiKeyIdAndDisplayNameContainingIgnoreCase(Long apiKeyId, String term);
 

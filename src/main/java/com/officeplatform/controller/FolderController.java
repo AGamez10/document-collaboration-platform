@@ -223,9 +223,20 @@ public class FolderController {
                     principal.resolveUserId(userId), principal.resolveUserName(userName));
             message = "Carpeta movida a la papelera";
         } else {
-            shareService.discardForUser(
+            // El resultado de descartar decide la respuesta. Sin esto, una carpeta compartida a
+            // nivel de proyecto —sin concesión individual para esta persona— no coincidía con
+            // ninguna fila, se modificaban cero registros y el controlador respondía 200 con
+            // "Carpeta movida a tu papelera" igual. El widget mostraba el aviso verde y al
+            // refrescar la carpeta seguía ahí: un éxito inventado, que es peor que un error.
+            int descartadas = shareService.discardForUser(
                     com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, id,
                     principal.resolveUserId(userId));
+            if (descartadas == 0) {
+                throw new com.officeplatform.exception.ShareAccessDeniedException(
+                        "No podés eliminar esta carpeta: no la creaste vos y no es algo que te "
+                                + "hayan compartido a vos en particular. Pedíselo a su autor o a un "
+                                + "administrador del proyecto.");
+            }
             message = "Carpeta movida a tu papelera";
         }
 

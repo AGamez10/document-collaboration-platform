@@ -209,6 +209,35 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
     }
 
+    /**
+     * Una operación que el recurso no admite responde 409, no 500.
+     *
+     * <p>Estos casos viajaban como {@code StorageException} y salían con "error interno del
+     * servidor". El usuario veía una falla del sistema frente a algo que él mismo podía corregir,
+     * y el monitoreo contaba como caída lo que era una regla de negocio funcionando.
+     */
+    @ExceptionHandler(InvalidOperationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidOperationException(
+            InvalidOperationException ex, HttpServletRequest request) {
+
+        ErrorResponse error = ErrorResponse.builder()
+            .code("INVALID_OPERATION")
+            .details(ex.getMessage())
+            .path(request.getRequestURI())
+            .timestamp(System.currentTimeMillis() / 1000)
+            .build();
+
+        ApiResponse<Void> response = ApiResponse.<Void>builder()
+            .success(false)
+            .timestamp(LocalDateTime.now())
+            .message(ex.getMessage())
+            .metadata(Map.of("error", error))
+            .build();
+
+        log.warn("InvalidOperationException en {}: {}", request.getRequestURI(), ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
     @ExceptionHandler(ShareAccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleShareAccessDeniedException(
             ShareAccessDeniedException ex, HttpServletRequest request) {

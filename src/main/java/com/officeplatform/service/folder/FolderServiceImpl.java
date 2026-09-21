@@ -25,6 +25,7 @@ import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
 import com.officeplatform.exception.FileNotFoundException;
 import com.officeplatform.exception.FolderNotFoundException;
+import com.officeplatform.exception.InvalidOperationException;
 import com.officeplatform.exception.StorageException;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
@@ -357,12 +358,14 @@ public class FolderServiceImpl implements FolderService {
             // carpeta, que es lo que lo vuelve visible para quienes la comparten.
             FolderEntity folder = folderRepository.findById(folderId)
                     .orElseThrow(() -> new FolderNotFoundException(folderId));
+            assertDoesNotPrivatize(file.getUserId(), folder.getUserId(), file.getOriginalFileName());
             file.setUserId(folder.getUserId());
             file.setApiKeyId(folder.getApiKeyId());
         } else {
             if ("shared".equalsIgnoreCase(scope)) {
                 file.setUserId(null);
             } else if ("private".equalsIgnoreCase(scope) && userId != null && !userId.isBlank()) {
+                assertDoesNotPrivatize(file.getUserId(), userId, file.getOriginalFileName());
                 file.setUserId(userId);
             }
         }
@@ -444,12 +447,14 @@ public class FolderServiceImpl implements FolderService {
 
         if (newParentId != null) {
             if (newParentId.equals(folderId)) {
-                throw new StorageException("No se puede mover una carpeta dentro de sí misma");
+                // 409 y no 500: el usuario pidió algo imposible, el servidor no falló.
+                throw new InvalidOperationException("No se puede mover una carpeta dentro de sí misma");
             }
             FolderEntity newParent = folderRepository.findByIdAndApiKeyId(newParentId, apiKeyId)
                     .orElseThrow(() -> new FolderNotFoundException(newParentId));
             if (isSelfOrAncestor(newParent, folderId, apiKeyId)) {
-                throw new StorageException("No se puede mover una carpeta dentro de una de sus propias sub-carpetas");
+                throw new InvalidOperationException(
+                        "No se puede mover una carpeta dentro de una de sus propias sub-carpetas");
             }
         }
 
@@ -468,6 +473,9 @@ public class FolderServiceImpl implements FolderService {
                 newUserId = userId;
             }
         }
+        // La carpeta arrastra a todo su contenido: privatizarla se lleva de un golpe cada archivo
+        // que haya adentro, y el árbol entero desaparece del espacio del equipo.
+        assertDoesNotPrivatize(folder.getUserId(), newUserId, folder.getName());
 
         propagateUserId(folder, newUserId, apiKeyId);
         FolderEntity saved = folderRepository.save(folder);
@@ -475,6 +483,28 @@ public class FolderServiceImpl implements FolderService {
         activityLogRecorder.record(apiKeyId, userId, userName, ActivityAction.MOVE_FOLDER,
                 null, saved.getName(), "Movida de carpeta " + previousParentId + " a " + newParentId, newParentId);
         return saved;
+    }
+
+    /**
+     * Impide que un movimiento saque del espacio compartido algo que es del proyecto.
+     *
+     * <p>Compartidos se define por {@code user_id IS NULL}. Al mover un recurso compartido a "Mis
+     * archivos" el backend le estampaba la cédula de quien lo movía, y en ese mismo instante el
+     * documento desaparecía para todo el resto del equipo: no quedaba borrado ni en la papelera,
+     * simplemente dejaba de existir para los demás. Con una carpeta el efecto se multiplica por
+     * todo su contenido. Y como un recurso compartido resuelve EDIT para cualquier integrante del
+     * proyecto, cualquiera podía hacerlo, sin intención y sin aviso.
+     *
+     * <p>Mover cambia de lugar; no cambia de dueño. Llevarse una copia propia es otra operación y
+     * tiene su propio endpoint, que deja el original donde está.
+     */
+    private static void assertDoesNotPrivatize(String currentUserId, String newUserId, String name) {
+        if (currentUserId == null && newUserId != null) {
+            throw new InvalidOperationException(
+                    "\"" + name + "\" es del espacio compartido del proyecto y no puede moverse a "
+                            + "Mis Archivos: dejaría de estar disponible para el resto del equipo. "
+                            + "Usá \"Hacer una copia\" si querés una versión propia.");
+        }
     }
 
     private void propagateUserId(FolderEntity folder, String newUserId, Long apiKeyId) {

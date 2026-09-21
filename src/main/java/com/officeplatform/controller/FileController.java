@@ -365,6 +365,55 @@ public class FileController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Hace una copia propia de un archivo sin quitárselo a nadie.
+     *
+     * <p>Existe porque mover un documento del espacio compartido a "Mis archivos" lo hacía
+     * desaparecer para todo el equipo. Esa operación ahora se rechaza y esta es la salida: quien
+     * quiere su versión personal se la lleva, y el original sigue donde estaba.
+     *
+     * <p>Alcanza con permiso de lectura sobre el original —copiar no lo modifica—, pero si la
+     * copia va a una carpeta, sobre esa carpeta sí se exige edición: escribir ahí es escribir.
+     */
+    @PostMapping("/{id}/copy")
+    public ResponseEntity<ApiResponse<FileResponse>> copy(
+            @PathVariable Long id,
+            @RequestBody(required = false) MoveFileRequest request,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String userName,
+            @RequestParam(required = false) String scope,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        com.officeplatform.entity.SharePermissionEntity.PermissionLevel level = shareService.getEffectivePermission(
+                com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id, principal);
+        if (level == null) {
+            throw new com.officeplatform.exception.ShareAccessDeniedException(
+                    "No tenés acceso a este archivo.");
+        }
+
+        Long targetFolderId = (request != null) ? request.getFolderId() : null;
+        if (targetFolderId != null) {
+            com.officeplatform.entity.SharePermissionEntity.PermissionLevel destLevel = shareService.getEffectivePermission(
+                    com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER, targetFolderId, principal);
+            if (destLevel != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
+                throw new com.officeplatform.exception.ShareAccessDeniedException(
+                        "Se requieren permisos de edición en la carpeta de destino.");
+            }
+        }
+
+        FileEntity copia = fileService.copyFile(
+                id, targetFolderId, principal.getApiKeyId(),
+                principal.resolveUserId(userId), principal.resolveUserName(userName), scope);
+
+        ApiResponse<FileResponse> response = ApiResponse.<FileResponse>builder()
+                .success(true)
+                .message("Copia creada correctamente")
+                .data(toFileResponse(copia))
+                .build();
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
     @PatchMapping("/{id}/move")
     public ResponseEntity<ApiResponse<FileResponse>> move(
             @PathVariable Long id,
@@ -425,9 +474,18 @@ public class FileController {
                     principal.resolveUserId(userId), principal.resolveUserName(userName));
             message = "Archivo movido a la papelera";
         } else {
-            shareService.discardForUser(
+            // El resultado de descartar decide la respuesta: cero filas tocadas no es un éxito.
+            // Ver la nota equivalente en FolderController: el archivo compartido a nivel de
+            // proyecto no tiene concesión individual, y el aviso verde mentía.
+            int descartados = shareService.discardForUser(
                     com.officeplatform.entity.SharePermissionEntity.ResourceType.FILE, id,
                     principal.resolveUserId(userId));
+            if (descartados == 0) {
+                throw new com.officeplatform.exception.ShareAccessDeniedException(
+                        "No podés eliminar este archivo: no lo creaste vos y no es algo que te "
+                                + "hayan compartido a vos en particular. Pedíselo a su autor o a un "
+                                + "administrador del proyecto.");
+            }
             message = "Archivo movido a tu papelera";
         }
 

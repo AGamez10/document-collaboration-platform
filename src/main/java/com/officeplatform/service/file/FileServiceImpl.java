@@ -628,6 +628,92 @@ public class FileServiceImpl implements FileService {
      * <p>The new item belongs to the folder's project and inherits its space, not the caller's:
      * a file dropped into a shared folder has to be reachable by the people who share that folder.
      */
+    /**
+     * Copia el binario y la fila, sin tocar el original.
+     *
+     * <p>El binario se duplica de verdad en el almacenamiento en lugar de apuntar las dos filas al
+     * mismo objeto: compartir el objeto haría que editar la copia cambiara el original, y que
+     * purgar cualquiera de los dos dejara al otro sin contenido.
+     *
+     * <p>La copia nace sin historial de versiones y sin las restricciones de acceso del original.
+     * Es un documento nuevo que arranca en su primera versión, de quien lo copió.
+     */
+    @Override
+    @Transactional
+    public FileEntity copyFile(Long fileId, Long targetFolderId, Long apiKeyId, String userId,
+                               String userName, String scope) {
+        FileEntity source = getFile(fileId, apiKeyId, userId);
+
+        // La copia ocupa espacio propio: cuenta contra la cuota igual que una subida.
+        assertQuotaAllows(apiKeyId, source.getSize());
+
+        String uuid = UUID.randomUUID().toString();
+        String extension = source.getExtension();
+        String storedFileName = FileUtils.generateStoredFileName(uuid, extension);
+
+        try (InputStream original = storageService.retrieve(source.getObjectName())) {
+            storageService.store(storedFileName, original, source.getSize(), source.getMimeType());
+        } catch (IOException e) {
+            throw new StorageException("No se pudo leer el archivo original para copiarlo", e);
+        }
+
+        String fileUserId = null;
+        Long effectiveApiKeyId = apiKeyId;
+        if (targetFolderId != null) {
+            FolderEntity parent = resolveContainingFolder(targetFolderId);
+            fileUserId = parent.getUserId();
+            effectiveApiKeyId = parent.getApiKeyId();
+        } else if ("private".equalsIgnoreCase(scope)) {
+            if (userId == null || userId.isBlank()) {
+                throw new StorageException(
+                        "Se requiere una identidad de usuario autenticado para copiar a Mis Archivos.");
+            }
+            fileUserId = userId.trim();
+        }
+
+        String effectiveUserName = (userName != null && !userName.isBlank()) ? userName : "Usuario";
+
+        FileEntity copy = FileEntity.builder()
+                .uuid(uuid)
+                .fileName(storedFileName)
+                .originalFileName(copyName(source.getOriginalFileName()))
+                .bucket(bucket)
+                .objectName(storedFileName)
+                .mimeType(source.getMimeType())
+                .extension(extension)
+                .size(source.getSize())
+                .apiKeyId(effectiveApiKeyId)
+                .folderId(targetFolderId)
+                .userId(fileUserId)
+                .createdByName(effectiveUserName)
+                .createdByUserId(userId)
+                .updatedByName(effectiveUserName)
+                .build();
+
+        FileEntity saved = fileRepository.save(copy);
+
+        fileIndexingService.indexAsync(saved.getId());
+        // Se registra como UPLOAD a propósito: activity_log tiene una restricción CHECK sobre la
+        // lista de acciones, y agregar un valor nuevo al enum compila y pasa los tests contra H2
+        // pero revienta en producción. El detalle dice de dónde salió.
+        activityLogRecorder.record(apiKeyId, userId, effectiveUserName, ActivityAction.UPLOAD,
+                saved.getId(), saved.getOriginalFileName(),
+                "Copia de \"" + source.getOriginalFileName() + "\"", saved.getFolderId());
+        return saved;
+    }
+
+    /** "informe.docx" se copia como "informe (copia).docx": la extensión tiene que sobrevivir. */
+    private static String copyName(String originalName) {
+        if (originalName == null || originalName.isBlank()) {
+            return "copia";
+        }
+        int dot = originalName.lastIndexOf('.');
+        if (dot <= 0) {
+            return originalName + " (copia)";
+        }
+        return originalName.substring(0, dot) + " (copia)" + originalName.substring(dot);
+    }
+
     private FolderEntity resolveContainingFolder(Long folderId) {
         return folderRepository.findById(folderId)
                 .orElseThrow(() -> new FolderNotFoundException(folderId));

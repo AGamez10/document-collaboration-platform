@@ -61,6 +61,17 @@ public interface FileService {
 
     FileEntity renameFile(Long fileId, Long apiKeyId, String newName, String userId, String userName);
 
+    /**
+     * Duplica un archivo dejando el original intacto.
+     *
+     * <p>Es la alternativa honesta a mover un documento compartido a "Mis archivos". Ese
+     * movimiento le sacaba el documento al equipo entero para dárselo a una sola persona; esto
+     * hace una copia propia y deja el original donde está, que es lo que quien lo pide realmente
+     * quiere.
+     */
+    FileEntity copyFile(Long fileId, Long targetFolderId, Long apiKeyId, String userId,
+                        String userName, String scope);
+
     void softDeleteFile(Long fileId, Long apiKeyId, String userId, String userName);
 
     FileEntity restoreFile(Long fileId, Long apiKeyId, String userId, String userName);

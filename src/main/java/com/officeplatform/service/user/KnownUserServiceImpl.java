@@ -54,7 +54,7 @@ public class KnownUserServiceImpl implements KnownUserService {
                 .apiKeyId(apiKeyId)
                 .userId(resolvedUserId)
                 .displayName(resolvedName)
-                .role(ROLE_USER)
+                .role(roleAlreadyDecidedFor(resolvedUserId))
                 .firstSeenAt(now)
                 .lastSeenAt(now)
                 .build();
@@ -72,6 +72,25 @@ public class KnownUserServiceImpl implements KnownUserService {
             applyVisit(existing, resolvedName, now);
             knownUserRepository.save(existing);
         }
+    }
+
+    /**
+     * Rol con el que nace una inscripción: el que esa persona ya tiene en otro proyecto.
+     *
+     * <p>El rol se administra por persona, no por proyecto — al promover a alguien,
+     * {@code AdminServiceImpl.updateUserRole} escribe el nuevo rol en <b>todas</b> sus filas. Pero
+     * esa sincronización solo alcanza a las filas que existen, y una inscripción se crea recién
+     * cuando la persona entra por primera vez a ese proyecto. Un administrador promovido hoy
+     * entraba mañana a un proyecto nuevo y aparecía como usuario común, sin que nadie hubiera
+     * degradado nada: la promoción simplemente no tenía dónde escribirse.
+     *
+     * <p>Basta con encontrarlo como administrador en algún lado. Degradarlo también sincroniza
+     * todas sus filas, así que un "admin" remanente significa que la decisión vigente es esa.
+     */
+    private String roleAlreadyDecidedFor(String userId) {
+        boolean adminEnOtroProyecto = knownUserRepository.findAllByUserId(userId).stream()
+                .anyMatch(u -> ROLE_ADMIN.equalsIgnoreCase(u.getRole()));
+        return adminEnOtroProyecto ? ROLE_ADMIN : ROLE_USER;
     }
 
     /** Refreshes last-seen and, when a name is supplied, the display name. */
