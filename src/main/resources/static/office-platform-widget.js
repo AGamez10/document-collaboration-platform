@@ -2011,17 +2011,19 @@
    * ningún <video> —, y el backend ya resuelve el canónico desde la extensión (MimeUtils).
    */
   /**
-   * Pide una copia propia de un archivo.
+   * Pide una copia de un archivo, diciendo explícitamente a qué espacio va.
    *
-   * <p>Mover un documento del espacio compartido a "Mis archivos" se lo sacaba al equipo entero;
-   * el backend ahora rechaza ese movimiento y esta es la salida. La copia cae donde la persona
-   * está parada: su carpeta actual, o su espacio si está en la raíz.
+   * <p>El destino se pasa siempre y no se deduce de dónde está parada la persona. Deducirlo dejaba
+   * un callejón sin salida: parado en Compartidos, el scope actual es "shared", así que la copia
+   * nacía compartida otra vez y moverla a Mis Archivos volvía a chocar contra la misma
+   * prohibición que la copia venía a resolver.
+   *
+   * @param scope    'private' para Mis Archivos, 'shared' para el espacio del proyecto
+   * @param folderId carpeta destino, o null para la raíz de ese espacio
    */
-  async function copyFile(id) {
-    const query = [];
-    const folderId = state.currentFolderId;
+  async function copyFile(id, scope, folderId) {
+    const query = ['scope=' + encodeURIComponent(scope)];
     if (folderId) query.push('folderId=' + encodeURIComponent(folderId));
-    query.push('scope=' + encodeURIComponent(getCurrentScope()));
     const res = await apiFetch('/api/files/' + id + '/copy?' + query.join('&'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2031,8 +2033,25 @@
     return j.data;
   }
 
-  function handleCopy(file) {
-    copyFile(file.id).then(function (copia) {
+  /**
+   * Se lleva una copia a Mis Archivos, a la raíz.
+   *
+   * <p>A la raíz y no a la carpeta actual a propósito: la carpeta donde está parada la persona
+   * pertenece al espacio compartido, y una copia adentro de ella volvería a ser del proyecto.
+   */
+  function handleCopyToPrivate(file) {
+    copyFile(file.id, 'private', null).then(function () {
+      toast('Copia guardada en Mis Archivos: ' + file.originalFileName, 'success');
+      // No se recarga la lista: la copia no vive en esta pestaña, y refrescar acá haría parecer
+      // que no pasó nada.
+    }).catch(function (err) {
+      toast('No se pudo copiar: ' + err.message, 'error');
+    });
+  }
+
+  /** Clona el archivo donde está, dentro del mismo espacio. */
+  function handleCopyHere(file) {
+    copyFile(file.id, getCurrentScope(), state.currentFolderId).then(function (copia) {
       toast('Copia creada: ' + ((copia && copia.originalFileName) || file.originalFileName), 'success');
       return loadFiles();
     }).catch(function (err) {
@@ -4202,8 +4221,22 @@
       menuItem('Descargar', ICONS.download, false, function () { downloadSingle(file.id, file.originalFileName); }),
       menuItem('Renombrar', ICONS.rename, false, function () { handleRename(file); }),
       menuItem('Mover', ICONS.move, false, function () { showMovePicker(file); }),
-      menuItem('Hacer una copia', ICONS.upload, false, function () { handleCopy(file); }),
     ];
+    // En Compartidos el destino tiene que ser explícito. "Hacer una copia" a secas copiaba dentro
+    // del mismo espacio compartido, y la copia quedaba tan imposible de llevarse a Mis Archivos
+    // como el original: la salida que el mensaje de error ofrecía no llevaba a ninguna parte.
+    if (state.section === 'shared') {
+      items.push(menuItem('Copiar a Mis Archivos', ICONS.upload, false, function () {
+        handleCopyToPrivate(file);
+      }));
+      items.push(menuItem('Duplicar aquí', ICONS.folderPlus, false, function () {
+        handleCopyHere(file);
+      }));
+    } else {
+      items.push(menuItem('Hacer una copia', ICONS.upload, false, function () {
+        handleCopyHere(file);
+      }));
+    }
     // Las macros VBA solo corren en Excel de escritorio, así que la puerta a esa app va donde
     // el usuario ya está mirando el archivo, no escondida dentro del editor.
     if (isExcelFile(file.originalFileName)) {

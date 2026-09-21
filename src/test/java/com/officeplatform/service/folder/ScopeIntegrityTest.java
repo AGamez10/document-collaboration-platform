@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 
 import java.util.List;
@@ -19,12 +20,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 
+import com.officeplatform.entity.ApiKeyEntity;
 import com.officeplatform.entity.FileEntity;
 import com.officeplatform.entity.FolderEntity;
 import com.officeplatform.exception.InvalidOperationException;
+import com.officeplatform.repository.ApiKeyRepository;
 import com.officeplatform.repository.FileRepository;
 import com.officeplatform.repository.FolderRepository;
+import com.officeplatform.repository.SharePermissionRepository;
 import com.officeplatform.service.activity.ActivityLogRecorder;
+import com.officeplatform.service.file.FileServiceImpl;
+import com.officeplatform.service.search.FileIndexingService;
 import com.officeplatform.service.storage.StorageService;
 
 /**
@@ -50,8 +56,12 @@ class ScopeIntegrityTest {
     @Mock private FileRepository fileRepository;
     @Mock private ActivityLogRecorder activityLogRecorder;
     @Mock private StorageService storageService;
+    @Mock private ApiKeyRepository apiKeyRepository;
+    @Mock private SharePermissionRepository sharePermissionRepository;
+    @Mock private FileIndexingService fileIndexingService;
 
     private FolderServiceImpl service;
+    private FileServiceImpl fileService;
     private FileEntity compartido;
     private FolderEntity carpetaCompartida;
     private FolderEntity carpetaPrivada;
@@ -59,6 +69,10 @@ class ScopeIntegrityTest {
     @BeforeEach
     void setUp() {
         service = new FolderServiceImpl(folderRepository, fileRepository, activityLogRecorder, storageService);
+        fileService = new FileServiceImpl(fileRepository, apiKeyRepository, folderRepository,
+                sharePermissionRepository, storageService, fileIndexingService, activityLogRecorder,
+                "office-platform",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
 
         compartido = FileEntity.builder()
                 .id(10L).uuid("uuid-10").fileName("procedimiento.docx")
@@ -85,6 +99,17 @@ class ScopeIntegrityTest {
                 .thenReturn(List.of());
         lenient().when(folderRepository.findAllByApiKeyIdAndParentIdAndDeletedAtIsNull(anyLong(), anyLong()))
                 .thenReturn(List.of());
+
+        // Lo que necesita la copia: resolver el original, leer su binario y no tener cuota que la
+        // frene. La cuota en null significa "sin límite", que es el estado de un proyecto recién
+        // creado.
+        ApiKeyEntity proyecto = new ApiKeyEntity();
+        proyecto.setId(PROJECT);
+        proyecto.setName("Proyecto X");
+        lenient().when(apiKeyRepository.findById(PROJECT)).thenReturn(Optional.of(proyecto));
+        lenient().when(fileRepository.findByIdAndDeletedAtIsNull(10L)).thenReturn(Optional.of(compartido));
+        lenient().when(storageService.retrieve(anyString()))
+                .thenAnswer(i -> new java.io.ByteArrayInputStream(new byte[] { 1, 2, 3 }));
     }
 
     @Test
@@ -143,6 +168,50 @@ class ScopeIntegrityTest {
         assertThatCode(() -> service.moveFile(11L, null, PROJECT, ME, "Ana", "private"))
                 .doesNotThrowAnyException();
         assertThat(propio.getUserId()).isEqualTo(ME);
+    }
+
+    // ── la salida que ofrece el mensaje de error ─────────────────────────────
+
+    @Test
+    @DisplayName("copying a shared file to My Files gives the caller a file of their own")
+    void copyingToPrivateProducesAFileOwnedByTheCaller() {
+        FileEntity copia = fileService.copyFile(10L, null, PROJECT, ME, "Ana", "private");
+
+        assertThat(copia.getUserId()).isEqualTo(ME);
+        assertThat(copia.getApiKeyId()).isEqualTo(PROJECT);
+        assertThat(copia.getFolderId()).isNull();
+        assertThat(copia.getOriginalFileName()).isEqualTo("procedimiento (copia).docx");
+        // Binario propio: compartir el objeto haría que editar la copia cambiara el original.
+        assertThat(copia.getObjectName()).isNotEqualTo(compartido.getObjectName());
+    }
+
+    @Test
+    @DisplayName("the shared original is untouched by the copy")
+    void copyingLeavesTheOriginalInTheSharedSpace() {
+        fileService.copyFile(10L, null, PROJECT, ME, "Ana", "private");
+
+        assertThat(compartido.getUserId()).isNull();
+        assertThat(compartido.getId()).isEqualTo(10L);
+        assertThat(compartido.getObjectName()).isEqualTo("obj-10");
+    }
+
+    @Test
+    @DisplayName("the private copy moves freely, which is the whole point of offering it")
+    void thePrivateCopyIsNotTrappedByTheSameRule() {
+        // El callejón sin salida que esto cierra: la copia nacía compartida, así que llevarla a
+        // Mis Archivos chocaba contra la misma prohibición que la copia venía a resolver. Si esta
+        // prueba falla, el mensaje "Usá Hacer una copia" vuelve a ser una salida que no sale.
+        FileEntity copia = fileService.copyFile(10L, null, PROJECT, ME, "Ana", "private");
+        copia.setId(99L);
+        lenient().when(fileRepository.findByIdAndApiKeyIdAndDeletedAtIsNull(99L, PROJECT))
+                .thenReturn(Optional.of(copia));
+
+        assertThatCode(() -> service.moveFile(99L, 2L, PROJECT, ME, "Ana", null))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> service.moveFile(99L, null, PROJECT, ME, "Ana", "private"))
+                .doesNotThrowAnyException();
+
+        assertThat(copia.getUserId()).isEqualTo(ME);
     }
 
     @Test
