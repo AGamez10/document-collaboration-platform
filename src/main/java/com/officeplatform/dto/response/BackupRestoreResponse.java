@@ -51,5 +51,14 @@ public class BackupRestoreResponse {
      */
     private int fileVersionsRestored;
 
+    /**
+     * Estados vivos congelados como versión antes de que el respaldo los pisara.
+     *
+     * <p>Un respaldo de las 11:00 restaurado a las 12:00 borra lo que la gente escribió en el
+     * medio. Este número dice cuánto trabajo se salvó de eso, y le avisa a quien restaura que
+     * esas personas tienen que ir a su historial de versiones a recuperarlo.
+     */
+    private int safetySnapshotsCreated;
+
     private List<String> warnings;
 }

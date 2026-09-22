@@ -110,6 +110,14 @@ public class BackupRestoreService {
         this.bucket = bucket;
     }
 
+    /**
+     * Texto con el que se marca un resguardo previo a restaurar.
+     *
+     * <p>El widget lo busca para destacar esas versiones: quien perdio su trabajo tiene que poder
+     * distinguirlas de un guardado cualquiera del historial.
+     */
+    public static final String SAFETY_SNAPSHOT_COMMENT = "Resguardo local previo a restaurar copia de seguridad";
+
     /** Accumulates counters and warnings while the restore walks the package. */
     private static final class Tally {
         int apiKeysCreated, apiKeysUpdated;
@@ -118,6 +126,7 @@ public class BackupRestoreService {
         int filesCreated, filesUpdated;
         int binariesRestored, binariesSkipped;
         int versionsCreated, versionsUpdated;
+        int safetySnapshotsCreated;
         int sharePermissionsCreated, sharePermissionsUpdated;
         final List<String> warnings = new ArrayList<>();
     }
@@ -181,7 +190,7 @@ public class BackupRestoreService {
         }
 
         Tally tally = new Tally();
-        restoreMetadata(manifest, tally);
+        restoreMetadata(manifest, fileName, tally);
         restoreBinaries(manifest.path("filesMetadata"), zipEntries, tally);
         restoreBinaries(manifest.path("fileVersionsMetadata"), zipEntries, tally);
 
@@ -215,6 +224,7 @@ public class BackupRestoreService {
                 .sharePermissionsCreated(tally.sharePermissionsCreated)
                 .sharePermissionsUpdated(tally.sharePermissionsUpdated)
                 .fileVersionsRestored(tally.versionsCreated + tally.versionsUpdated)
+                .safetySnapshotsCreated(tally.safetySnapshotsCreated)
                 .warnings(tally.warnings)
                 .build();
     }
@@ -223,12 +233,19 @@ public class BackupRestoreService {
      * Writes the manifest into the database in dependency order, inside a single transaction so a
      * failure half-way cannot leave folders pointing at parents that were never committed.
      */
-    private void restoreMetadata(JsonNode manifest, Tally tally) {
+    private void restoreMetadata(JsonNode manifest, String backupFileName, Tally tally) {
+        // El numero de version mas alto que trae el paquete para cada archivo. El resguardo tiene
+        // que quedar por encima de eso y de lo que ya existe localmente, o la version que el
+        // propio respaldo restaura despues chocaria contra la clave unica (archivo, numero).
+        Map<Long, Integer> maxVersionDelPaquete = maxVersionByBackupFileId(
+                manifest.path("fileVersionsMetadata"));
+
         transactionTemplate.executeWithoutResult(status -> {
             Map<Long, Long> apiKeyIds = restoreApiKeys(manifest.path("apiKeysMetadata"), tally);
             restoreKnownUsers(manifest.path("knownUsersMetadata"), apiKeyIds, tally);
             Map<Long, Long> folderIds = restoreFolders(manifest.path("foldersMetadata"), apiKeyIds, tally);
-            Map<Long, Long> fileIds = restoreFiles(manifest.path("filesMetadata"), apiKeyIds, folderIds, tally);
+            Map<Long, Long> fileIds = restoreFiles(manifest.path("filesMetadata"), apiKeyIds, folderIds,
+                    maxVersionDelPaquete, backupFileName, tally);
             // Los permisos van al final porque cada regla apunta a un archivo o carpeta y necesita
             // los ids que acaban de asignarse. Dentro de la misma transacción: restaurar los
             // documentos y perder sus restricciones dejaría a la vista lo que estaba limitado.
@@ -259,6 +276,134 @@ public class BackupRestoreService {
         } catch (Exception e) {
             log.warn("No se pudo encolar el indexado tras la restauración: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Congela el estado vivo de un archivo como version, antes de que el respaldo lo reemplace.
+     *
+     * <p>El caso que esto resuelve: el respaldo es de las 11:00 y alguien guardo cambios a las
+     * 11:50. Restaurar sobre un sistema en uso pisaba ese trabajo sin dejar rastro — ni en la
+     * papelera, ni en el historial, en ningun lado. Ahora queda como una version mas, y quien
+     * perdio su trabajo lo recupera con un clic en "Restaurar" de su historial.
+     *
+     * <p>No se toma resguardo cuando el archivo vivo es identico al del paquete: seria duplicar
+     * el mismo binario en el almacenamiento a cambio de nada.
+     *
+     * <p>Nunca propaga errores. Un resguardo que no se pudo tomar es lamentable; una restauracion
+     * que se aborta por eso deja al administrador sin el respaldo Y sin lo vivo.
+     */
+    private void snapshotLocalState(FileEntity entity, JsonNode node, Integer maxVersionDelPaquete,
+                                    String backupFileName, Tally tally) {
+        try {
+            String objectNameLocal = entity.getObjectName();
+            if (objectNameLocal == null || objectNameLocal.isBlank()) {
+                return;
+            }
+            if (!difiereDelPaquete(entity, node)) {
+                return;
+            }
+
+            byte[] contenidoVivo;
+            try (InputStream in = storageService.retrieve(objectNameLocal)) {
+                contenidoVivo = in.readAllBytes();
+            }
+            if (contenidoVivo.length == 0) {
+                // Un objeto vacio no es trabajo que alguien quiera recuperar.
+                return;
+            }
+
+            int siguiente = nextSafetyVersionNumber(entity.getId(), maxVersionDelPaquete);
+            String extension = extensionOf(entity.getOriginalFileName(), objectNameLocal);
+            String objectNameVersion = "versions/" + entity.getUuid() + "/v" + siguiente
+                    + (extension.isEmpty() ? "" : "." + extension);
+
+            try (InputStream copia = new java.io.ByteArrayInputStream(contenidoVivo)) {
+                storageService.store(objectNameVersion, copia, contenidoVivo.length,
+                        entity.getMimeType() != null ? entity.getMimeType() : "application/octet-stream");
+            }
+
+            boolean editado = entity.getUpdatedByName() != null;
+            fileVersionRepository.save(com.officeplatform.entity.FileVersionEntity.builder()
+                    .fileId(entity.getId())
+                    .versionNumber(siguiente)
+                    .objectName(objectNameVersion)
+                    .size((long) contenidoVivo.length)
+                    .createdByUserId(editado ? entity.getCreatedByUserId() : entity.getUserId())
+                    .createdByName(editado ? entity.getUpdatedByName() : entity.getCreatedByName())
+                    .createdAt(entity.getUpdatedAt() != null ? entity.getUpdatedAt() : LocalDateTime.now())
+                    .comment(SAFETY_SNAPSHOT_COMMENT + " (" + backupFileName + ")")
+                    .build());
+
+            tally.safetySnapshotsCreated++;
+            tally.warnings.add("El estado vivo de '" + entity.getOriginalFileName()
+                    + "' quedo guardado como version " + siguiente
+                    + ": se recupera desde su historial de versiones.");
+            log.info("Snapshot de seguridad creado para '{}' (v{}) antes de aplicar respaldo",
+                    entity.getOriginalFileName(), siguiente);
+        } catch (Exception e) {
+            log.warn("No se pudo resguardar el estado vivo de '{}': {}",
+                    entity.getOriginalFileName(), e.getMessage());
+        }
+    }
+
+    /**
+     * Si el archivo vivo tiene algo que el paquete no traiga.
+     *
+     * <p>Se mira el tamaño, la clave del binario y la fecha de modificacion. El tamaño y la clave
+     * responden por si el contenido cambio; la fecha cubre el caso incomodo de una edicion que
+     * deja el archivo del mismo tamaño, que con documentos ofimaticos pasa mas seguido de lo que
+     * parece.
+     */
+    private static boolean difiereDelPaquete(FileEntity entity, JsonNode node) {
+        Long sizeDelPaquete = number(node, "size");
+        if (sizeDelPaquete != null && !sizeDelPaquete.equals(entity.getSize())) {
+            return true;
+        }
+        String objectDelPaquete = text(node, "objectName");
+        if (objectDelPaquete != null && !objectDelPaquete.equals(entity.getObjectName())) {
+            return true;
+        }
+        LocalDateTime actualizadoEnElPaquete = dateTime(node, "updatedAt", null);
+        return entity.getUpdatedAt() != null && actualizadoEnElPaquete != null
+                && entity.getUpdatedAt().isAfter(actualizadoEnElPaquete);
+    }
+
+    /** Por encima de lo que ya existe aca y de lo que el paquete va a restaurar despues. */
+    private int nextSafetyVersionNumber(Long fileId, Integer maxVersionDelPaquete) {
+        int local = fileVersionRepository.findFirstByFileIdOrderByVersionNumberDesc(fileId)
+                .map(com.officeplatform.entity.FileVersionEntity::getVersionNumber)
+                .orElse(0);
+        int delPaquete = maxVersionDelPaquete == null ? 0 : maxVersionDelPaquete;
+        return Math.max(local, delPaquete) + 1;
+    }
+
+    /** Version mas alta que el paquete trae por archivo, indexada por el id del respaldo. */
+    private Map<Long, Integer> maxVersionByBackupFileId(JsonNode versionsMetadata) {
+        Map<Long, Integer> porArchivo = new HashMap<>();
+        for (JsonNode node : arrayOf(versionsMetadata)) {
+            Long fileId = number(node, "fileId");
+            if (fileId == null || !node.hasNonNull("versionNumber")) {
+                continue;
+            }
+            int numero = node.get("versionNumber").asInt();
+            porArchivo.merge(fileId, numero, Math::max);
+        }
+        return porArchivo;
+    }
+
+    /** Extension del nombre visible, con la clave del objeto como respaldo. */
+    private static String extensionOf(String originalFileName, String objectName) {
+        for (String candidato : new String[] { originalFileName, objectName }) {
+            if (candidato == null) {
+                continue;
+            }
+            int dot = candidato.lastIndexOf('.');
+            int slash = candidato.lastIndexOf('/');
+            if (dot > slash && dot < candidato.length() - 1) {
+                return candidato.substring(dot + 1);
+            }
+        }
+        return "";
     }
 
     /**
@@ -464,7 +609,9 @@ public class BackupRestoreService {
 
     /** @return map from the file id recorded in the backup to the id in this database */
     private Map<Long, Long> restoreFiles(JsonNode nodes, Map<Long, Long> apiKeyIds,
-                                         Map<Long, Long> folderIds, Tally tally) {
+                                         Map<Long, Long> folderIds,
+                                         Map<Long, Integer> maxVersionDelPaquete,
+                                         String backupFileName, Tally tally) {
         Map<Long, Long> idMap = new HashMap<>();
         for (JsonNode node : arrayOf(nodes)) {
             String uuid = text(node, "uuid");
@@ -478,6 +625,12 @@ public class BackupRestoreService {
                 entity.setUuid(uuid);
                 entity.setCreatedAt(dateTime(node, "createdAt", LocalDateTime.now()));
             }
+            if (!isNew) {
+                // Antes de pisar nada: lo que hay vivo puede ser mas nuevo que el respaldo.
+                snapshotLocalState(entity, node, maxVersionDelPaquete.get(number(node, "id")),
+                        backupFileName, tally);
+            }
+
             entity.setOriginalFileName(text(node, "originalFileName"));
             entity.setObjectName(text(node, "objectName"));
             // NOT NULL columns. The manifest normally carries them; the fallbacks cover a package

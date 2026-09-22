@@ -1056,6 +1056,35 @@
       font-weight: 500;
     }
 
+    /* ── Historial de versiones: estado actual y resguardos ─────────────── */
+    .op-mh-current {
+      border: 1px solid var(--op-border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: var(--op-space-3);
+      background: var(--op-bg-hover);
+    }
+    .op-mh-current-title { font-size: 12px; font-weight: 600; color: var(--op-text); }
+    .op-mh-current-meta { font-size: 12.5px; color: var(--op-text-secondary); margin-top: 2px; }
+    .op-mh-comment { font-size: 11.5px; color: var(--op-text-secondary); margin-top: 2px; }
+    .op-mh-safety {
+      display: inline-block;
+      margin-top: 4px;
+      padding: 1px 7px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #7a4b00;
+      background: #ffe8b3;
+      border: 1px solid #f0b429;
+    }
+    .op-mh-row-safety { background: rgba(240, 180, 41, 0.08); }
+    .op-mh-safety-note { color: #7a4b00; }
+    @media (prefers-color-scheme: dark) {
+      .op-mh-safety { color: #ffe8b3; background: rgba(240, 180, 41, 0.18); }
+      .op-mh-safety-note { color: #f0c568; }
+    }
+
     /* ── Visor de multimedia ───────────────────────────────────────────── */
     .op-media-modal { max-width: 900px; width: 92vw; }
     .op-audio-modal { max-width: 520px; width: 92vw; }
@@ -3153,12 +3182,35 @@
    * vigente, así que la operación nunca destruye: eso se dice en el modal, porque el miedo a
    * "perder lo que tengo ahora" es lo que hace que nadie use un historial.
    */
+  /** Marca con la que el backend identifica un resguardo previo a restaurar un respaldo. */
+  const SAFETY_SNAPSHOT_MARK = 'Resguardo local previo a restaurar';
+
+  function isSafetySnapshot(version) {
+    return !!(version && version.comment && version.comment.indexOf(SAFETY_SNAPSHOT_MARK) >= 0);
+  }
+
   function showVersionHistory(file) {
     const shell = buildModalShell('Historial de versiones');
     const intro = document.createElement('p');
     intro.className = 'op-mh-intro';
     intro.textContent = file.originalFileName;
     shell.body.appendChild(intro);
+
+    // Qué se está mirando ahora mismo. Sin esto, una lista de versiones no dice contra qué
+    // compararlas: la pregunta que trae a alguien acá es "¿qué tengo abierto y qué había antes?".
+    const actual = document.createElement('div');
+    actual.className = 'op-mh-current';
+    const actualTitulo = document.createElement('div');
+    actualTitulo.className = 'op-mh-current-title';
+    actualTitulo.textContent = 'Versión activa';
+    const actualDetalle = document.createElement('div');
+    actualDetalle.className = 'op-mh-current-meta';
+    actualDetalle.textContent = formatBytes(file.size || 0)
+      + ' · ' + formatDate(file.updatedAt || file.createdAt)
+      + ' · ' + (file.updatedByName || file.createdByName || '—');
+    actual.appendChild(actualTitulo);
+    actual.appendChild(actualDetalle);
+    shell.body.appendChild(actual);
 
     const loading = document.createElement('div');
     loading.className = 'op-mh-intro';
@@ -3182,6 +3234,17 @@
         + 'versión más antes de reemplazarlo.';
       shell.body.appendChild(nota);
 
+      // Si hay un resguardo, decirlo arriba y no solo en una fila: quien entra acá despues de una
+      // restauracion viene buscando exactamente eso.
+      if (versions.some(isSafetySnapshot)) {
+        const aviso = document.createElement('p');
+        aviso.className = 'op-mh-intro op-mh-safety-note';
+        aviso.textContent = 'Un administrador restauró una copia de seguridad sobre este archivo. '
+          + 'Lo que habías guardado antes quedó a salvo en la versión marcada como resguardo: '
+          + 'tocá Restaurar sobre ella para recuperarlo.';
+        shell.body.appendChild(aviso);
+      }
+
       const table = document.createElement('table');
       table.className = 'op-mh-table';
       table.innerHTML = '<thead><tr><th>Versión</th><th>Cuándo</th><th>Quién</th>'
@@ -3200,8 +3263,26 @@
         tr.appendChild(when);
 
         const who = document.createElement('td');
-        who.textContent = v.createdByName || v.createdByUserId || '—';
-        who.title = v.comment || '';
+        const quien = document.createElement('div');
+        quien.textContent = v.createdByName || v.createdByUserId || '—';
+        who.appendChild(quien);
+        // El comentario deja de vivir solo en un tooltip: es la unica pista de por que existe
+        // esa version, y un tooltip no se descubre cuando uno esta buscando su trabajo perdido.
+        if (v.comment) {
+          const detalle = document.createElement('div');
+          detalle.className = 'op-mh-comment';
+          detalle.textContent = v.comment;
+          who.appendChild(detalle);
+        }
+        if (isSafetySnapshot(v)) {
+          const marca = document.createElement('span');
+          marca.className = 'op-mh-safety';
+          marca.textContent = 'Resguardo de seguridad';
+          marca.title = 'Esta versión contiene el trabajo que tenías antes de restaurar la copia '
+            + 'de seguridad. Podés volver a ella con el botón Restaurar.';
+          who.appendChild(marca);
+          tr.classList.add('op-mh-row-safety');
+        }
         tr.appendChild(who);
 
         const size = document.createElement('td');
