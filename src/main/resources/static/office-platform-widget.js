@@ -1065,17 +1065,22 @@
       margin-bottom: var(--op-space-3);
       background: var(--op-bg-hover);
     }
+    /* Las insignias llevan su propio fondo, así que su color NO puede depender del tema: una
+       regla @media (prefers-color-scheme: dark) las pintaba en tonos pastel porque Windows estaba
+       en oscuro, mientras la tarjeta seguía blanca porque el widget estaba en claro. Texto verde
+       agua sobre blanco da 1.1:1 de contraste, o sea invisible. Con el par fijo texto oscuro
+       sobre fondo suave, la insignia se lee igual en los dos temas y cumple WCAG AA. */
     .op-mh-live-badge {
       display: inline-block;
       margin-bottom: 6px;
-      padding: 2px 9px;
+      padding: 3px 10px;
       border-radius: 999px;
       font-size: 11px;
       font-weight: 700;
       letter-spacing: 0.02em;
-      color: #1b6b32;
-      background: #d8f5df;
-      border: 1px solid #8ce0a5;
+      color: #14532d;
+      background: #dcfce7;
+      border: 1px solid #86efac;
     }
     .op-mh-current-title { font-size: 13.5px; font-weight: 600; color: var(--op-text); }
     .op-mh-current-meta { font-size: 12.5px; color: var(--op-text-secondary); margin-top: 2px; }
@@ -1088,9 +1093,9 @@
     .op-mh-current--local { border-left-color: #2f9e44; }
     .op-mh-current--backup { border-left-color: #7c4dbd; }
     .op-mh-live-badge--backup {
-      color: #5b2d8e;
-      background: #ece0fa;
-      border-color: #b795e0;
+      color: #4a044e;
+      background: #f5d0fe;
+      border-color: #d946ef;
     }
 
     /* El historial no entra en los 520px del modal por defecto: son seis columnas, y con ese
@@ -1099,13 +1104,34 @@
        horizontal para encontrarlos es hacer invisible lo unico que la persona vino a tocar. */
     .op-modal-wide { max-width: 820px !important; width: 95vw !important; }
     .op-modal-wide .op-modal-body { overflow-x: hidden; }
-    .op-mh-table { table-layout: fixed; }
-    .op-mh-table th, .op-mh-table td { overflow-wrap: anywhere; }
-    .op-mh-table th:nth-child(1), .op-mh-table td:nth-child(1) { width: 58px; }
-    .op-mh-table th:nth-child(2), .op-mh-table td:nth-child(2) { width: 34%; }
-    .op-mh-table th:nth-child(3), .op-mh-table td:nth-child(3) { width: 120px; }
-    .op-mh-table th:nth-child(5), .op-mh-table td:nth-child(5) { width: 78px; }
-    .op-mh-table th:nth-child(6), .op-mh-table td:nth-child(6) { width: 168px; }
+    /* Los anchos van acotados al modal ancho: la misma clase .op-mh-table la usa la tabla de
+       equivalencias del asistente de macros, que tiene tres columnas y otra proporción. */
+    .op-modal-wide .op-mh-table { table-layout: fixed; }
+    .op-modal-wide .op-mh-table th,
+    .op-modal-wide .op-mh-table td {
+      padding: 10px 12px;
+      /* break-word y no anywhere: "anywhere" partía palabras corrientes letra por letra y dejaba
+         columnas de sílabas sueltas. Así solo se parte lo que no entra de ninguna manera. */
+      word-break: normal;
+      overflow-wrap: break-word;
+    }
+    .op-modal-wide .op-mh-table th:nth-child(1),
+    .op-modal-wide .op-mh-table td:nth-child(1) { width: 75px; white-space: nowrap; }
+    .op-modal-wide .op-mh-table th:nth-child(2),
+    .op-modal-wide .op-mh-table td:nth-child(2) { width: auto; }
+    .op-modal-wide .op-mh-table th:nth-child(3),
+    .op-modal-wide .op-mh-table td:nth-child(3) { width: 140px; white-space: nowrap; font-size: 12px; }
+    .op-modal-wide .op-mh-table th:nth-child(4),
+    .op-modal-wide .op-mh-table td:nth-child(4) {
+      width: 130px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .op-modal-wide .op-mh-table th:nth-child(5),
+    .op-modal-wide .op-mh-table td:nth-child(5) { width: 75px; white-space: nowrap; }
+    .op-modal-wide .op-mh-table th:nth-child(6),
+    .op-modal-wide .op-mh-table td:nth-child(6) { width: 155px; text-align: right; }
     .op-mh-actions {
       display: flex;
       gap: 6px;
@@ -1121,41 +1147,33 @@
 
     .op-mh-tag {
       display: inline-block;
-      padding: 2px 9px;
+      font-weight: 700;
+      padding: 3px 10px;
       border-radius: 999px;
       font-size: 11px;
       font-weight: 600;
       white-space: nowrap;
     }
-    .op-mh-tag--safety { color: #7a4b00; background: #ffe8b3; border: 1px solid #f0b429; }
-    .op-mh-tag--editor { color: #14487a; background: #d7e9fb; border: 1px solid #8cbcea; }
-    .op-mh-tag--restored { color: #5b2d8e; background: #ece0fa; border: 1px solid #b795e0; }
+    .op-mh-tag--safety { color: #78350f; background: #fef3c7; border: 1px solid #f59e0b; }
+    .op-mh-tag--editor { color: #0369a1; background: #e0f2fe; border: 1px solid #38bdf8; }
+    .op-mh-tag--restored { color: #4a044e; background: #f5d0fe; border: 1px solid #d946ef; }
     .op-mh-tag-detail {
-      font-size: 11px;
+      font-size: 12px;
       color: var(--op-text-secondary);
-      margin-top: 3px;
-      max-width: 230px;
-      line-height: 1.35;
+      margin-top: 4px;
+      line-height: 1.4;
     }
     .op-mh-row-safety { background: rgba(240, 180, 41, 0.08); }
     /* Era un parrafo mas entre parrafos: el aviso que explica donde quedo el trabajo de alguien
        no puede leerse igual que el resto del texto de la pantalla. */
     .op-mh-safety-note {
-      color: #92400e;
+      color: #78350f;
       background: #fffbeb;
       border: 1px solid #fde68a;
       border-radius: 8px;
       padding: 12px;
       margin: 0 0 12px;
       line-height: 1.5;
-    }
-    @media (prefers-color-scheme: dark) {
-      .op-mh-live-badge { color: #b7f0c6; background: rgba(47, 158, 68, 0.2); border-color: #2f9e44; }
-      .op-mh-live-badge--backup { color: #d9c2f5; background: rgba(140, 90, 200, 0.22); border-color: #7c4dbd; }
-      .op-mh-tag--safety { color: #ffe8b3; background: rgba(240, 180, 41, 0.18); }
-      .op-mh-tag--editor { color: #b9d9f7; background: rgba(60, 130, 200, 0.18); }
-      .op-mh-tag--restored { color: #d9c2f5; background: rgba(140, 90, 200, 0.2); }
-      .op-mh-safety-note { color: #fcd9a0; background: rgba(240, 180, 41, 0.12); border-color: rgba(240, 180, 41, 0.45); }
     }
 
     /* ── Visor de multimedia ───────────────────────────────────────────── */
