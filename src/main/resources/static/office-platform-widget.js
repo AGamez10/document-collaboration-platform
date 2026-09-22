@@ -1079,7 +1079,45 @@
     }
     .op-mh-current-title { font-size: 13.5px; font-weight: 600; color: var(--op-text); }
     .op-mh-current-meta { font-size: 12.5px; color: var(--op-text-secondary); margin-top: 2px; }
-    .op-mh-comment { font-size: 11.5px; color: var(--op-text-secondary); margin-top: 2px; }
+    .op-mh-current-note {
+      font-size: 12px;
+      color: var(--op-text-secondary);
+      margin-top: 6px;
+      line-height: 1.45;
+    }
+    .op-mh-current--local { border-left-color: #2f9e44; }
+    .op-mh-current--backup { border-left-color: #7c4dbd; }
+    .op-mh-live-badge--backup {
+      color: #5b2d8e;
+      background: #ece0fa;
+      border-color: #b795e0;
+    }
+
+    /* El historial no entra en los 520px del modal por defecto: son seis columnas, y con ese
+       ancho la de acciones quedaba empujada fuera de la vista. Los botones Descargar y Restaurar
+       son el motivo por el que alguien abre esta pantalla; que haya que arrastrar una barra
+       horizontal para encontrarlos es hacer invisible lo unico que la persona vino a tocar. */
+    .op-modal-wide { max-width: 820px !important; width: 95vw !important; }
+    .op-modal-wide .op-modal-body { overflow-x: hidden; }
+    .op-mh-table { table-layout: fixed; }
+    .op-mh-table th, .op-mh-table td { overflow-wrap: anywhere; }
+    .op-mh-table th:nth-child(1), .op-mh-table td:nth-child(1) { width: 58px; }
+    .op-mh-table th:nth-child(2), .op-mh-table td:nth-child(2) { width: 34%; }
+    .op-mh-table th:nth-child(3), .op-mh-table td:nth-child(3) { width: 120px; }
+    .op-mh-table th:nth-child(5), .op-mh-table td:nth-child(5) { width: 78px; }
+    .op-mh-table th:nth-child(6), .op-mh-table td:nth-child(6) { width: 168px; }
+    .op-mh-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+      flex-wrap: nowrap;
+    }
+    .op-mh-actions button {
+      padding: 5px 10px;
+      font-size: 11.5px;
+      white-space: nowrap;
+      min-width: 0;
+    }
 
     .op-mh-tag {
       display: inline-block;
@@ -1100,13 +1138,24 @@
       line-height: 1.35;
     }
     .op-mh-row-safety { background: rgba(240, 180, 41, 0.08); }
-    .op-mh-safety-note { color: #7a4b00; }
+    /* Era un parrafo mas entre parrafos: el aviso que explica donde quedo el trabajo de alguien
+       no puede leerse igual que el resto del texto de la pantalla. */
+    .op-mh-safety-note {
+      color: #92400e;
+      background: #fffbeb;
+      border: 1px solid #fde68a;
+      border-radius: 8px;
+      padding: 12px;
+      margin: 0 0 12px;
+      line-height: 1.5;
+    }
     @media (prefers-color-scheme: dark) {
       .op-mh-live-badge { color: #b7f0c6; background: rgba(47, 158, 68, 0.2); border-color: #2f9e44; }
+      .op-mh-live-badge--backup { color: #d9c2f5; background: rgba(140, 90, 200, 0.22); border-color: #7c4dbd; }
       .op-mh-tag--safety { color: #ffe8b3; background: rgba(240, 180, 41, 0.18); }
       .op-mh-tag--editor { color: #b9d9f7; background: rgba(60, 130, 200, 0.18); }
       .op-mh-tag--restored { color: #d9c2f5; background: rgba(140, 90, 200, 0.2); }
-      .op-mh-safety-note { color: #f0c568; }
+      .op-mh-safety-note { color: #fcd9a0; background: rgba(240, 180, 41, 0.12); border-color: rgba(240, 180, 41, 0.45); }
     }
 
     /* ── Visor de multimedia ───────────────────────────────────────────── */
@@ -3214,36 +3263,105 @@
   }
 
   /**
+   * Número de versión que se restauró para crear esta entrada, o null si no nació de un restaurar.
+   *
+   * <p>Al restaurar, el backend archiva el estado que se está por reemplazar con el comentario
+   * "Estado previo a restaurar la versión N". Ese N es el hilo que permite contar la historia:
+   * sin él, una versión solo dice que existió, no qué la desplazó.
+   */
+  function restoreTargetOf(version) {
+    const m = /restaurar la versi[oó]n\s*(\d+)/i.exec((version && version.comment) || '');
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function versionByNumber(versions, numero) {
+    for (let i = 0; i < versions.length; i++) {
+      if (versions[i].versionNumber === numero) return versions[i];
+    }
+    return null;
+  }
+
+  /**
+   * Qué documento tiene abierto la persona en este instante.
+   *
+   * <p>Después de una restauración de respaldo conviven dos documentos con el mismo nombre: el que
+   * trajo el backup y el que la persona tenía antes. Decir solo "versión vigente" no responde la
+   * única pregunta que importa en ese momento — cuál de los dos estoy mirando.
+   *
+   * @returns 'local-recuperado' | 'respaldo-activo' | 'vigente'
+   */
+  function activeStateOf(versions) {
+    let ultimoRestore = null;
+    let ultimoResguardo = null;
+    versions.forEach(function (v) {
+      if (restoreTargetOf(v) !== null
+          && (!ultimoRestore || v.versionNumber > ultimoRestore.versionNumber)) {
+        ultimoRestore = v;
+      }
+      if (isSafetySnapshot(v)
+          && (!ultimoResguardo || v.versionNumber > ultimoResguardo.versionNumber)) {
+        ultimoResguardo = v;
+      }
+    });
+
+    // La última restauración apuntó a un resguardo: lo que está abierto es el trabajo recuperado.
+    if (ultimoRestore && isSafetySnapshot(versionByNumber(versions, restoreTargetOf(ultimoRestore)))) {
+      return 'local-recuperado';
+    }
+    // Hay un resguardo y nadie lo restauró después: lo abierto vino en la copia de seguridad.
+    if (ultimoResguardo
+        && (!ultimoRestore || ultimoRestore.versionNumber < ultimoResguardo.versionNumber)) {
+      return 'respaldo-activo';
+    }
+    return 'vigente';
+  }
+
+  /**
    * De dónde salió cada versión, leído de su comentario.
    *
    * <p>Un número de versión no dice nada: "v7" no le explica a nadie por qué existe ni si es la
    * que está buscando. El origen sí, y es lo primero que mira quien entra acá después de perder
    * un trabajo.
    */
-  function versionOrigin(version) {
-    const comentario = (version && version.comment) || '';
+  function versionOrigin(version, versions) {
     if (isSafetySnapshot(version)) {
       return {
         clase: 'op-mh-tag--safety',
-        etiqueta: '🛡️ Resguardo pre-respaldo',
-        detalle: 'Tu trabajo local antes de restaurar el backup. Tocá Restaurar para recuperarlo.',
+        etiqueta: '🛡️ Trabajo local pre-respaldo',
+        detalle: 'Lo que tenías antes de que se restaurara el backup. Tocá Restaurar para recuperarlo.',
         titulo: 'Un administrador restauró una copia de seguridad sobre este archivo. Esta versión '
           + 'guarda lo que vos tenías justo antes.',
       };
     }
-    if (comentario.indexOf('restaurar la versión') >= 0) {
+
+    const objetivo = restoreTargetOf(version);
+    if (objetivo !== null) {
+      // Si lo que se restauró era un resguardo, esta entrada es el documento que trajo el
+      // respaldo. Llamarla "estado previo a restaurar la versión 5" es técnicamente cierto y
+      // completamente inútil: no dice de dónde salió ese estado ni por qué dejó de estar.
+      if (isSafetySnapshot(versionByNumber(versions || [], objetivo))) {
+        return {
+          clase: 'op-mh-tag--restored',
+          etiqueta: '📦 Copia del respaldo',
+          detalle: 'Versión que venía en la copia de seguridad (reemplazada al recuperar tu '
+            + 'trabajo local).',
+          titulo: 'Este es el documento que trajo el respaldo, guardado al recuperar el trabajo '
+            + 'local.',
+        };
+      }
       return {
         clase: 'op-mh-tag--restored',
-        etiqueta: '📦 Versión restaurada',
-        detalle: '',
+        etiqueta: '📦 Versión reemplazada',
+        detalle: 'Estado que tenía el archivo antes de restaurar la versión ' + objetivo + '.',
         titulo: 'Este era el estado del archivo antes de que alguien restaurara otra versión.',
       };
     }
+
     return {
       clase: 'op-mh-tag--editor',
       etiqueta: '💾 Edición en línea',
-      detalle: '',
-      titulo: 'Estado previo a un guardado hecho desde el editor.',
+      detalle: 'Estado previo a un guardado hecho desde el editor.',
+      titulo: 'Cada guardado desde el editor archiva el estado anterior.',
     };
   }
 
@@ -3263,6 +3381,7 @@
 
   function showVersionHistory(file) {
     const shell = buildModalShell('Historial de versiones');
+    shell.box.classList.add('op-modal-wide');
     const intro = document.createElement('p');
     intro.className = 'op-mh-intro';
     intro.textContent = file.originalFileName;
@@ -3289,6 +3408,13 @@
       + ' · ' + formatDate(file.updatedAt || file.createdAt)
       + ' · ' + versionAuthor({ createdByName: file.updatedByName || file.createdByName });
     actual.appendChild(actualDetalle);
+
+    // El subtítulo se completa cuando llega el historial: recién ahí se sabe cuál de los dos
+    // documentos —el del respaldo o el propio— es el que está abierto.
+    const actualExplicacion = document.createElement('div');
+    actualExplicacion.className = 'op-mh-current-note';
+    actualExplicacion.hidden = true;
+    actual.appendChild(actualExplicacion);
     shell.body.appendChild(actual);
 
     const loading = document.createElement('div');
@@ -3298,6 +3424,24 @@
 
     listVersions(file.id).then(function (versions) {
       loading.remove();
+
+      const estado = activeStateOf(versions);
+      if (estado === 'local-recuperado') {
+        actual.classList.add('op-mh-current--local');
+        insignia.className = 'op-mh-live-badge op-mh-live-badge--local';
+        insignia.textContent = '🟢 Trabajo local recuperado';
+        actualExplicacion.textContent = 'Estás trabajando sobre la versión que tenías antes de la '
+          + 'restauración del respaldo (recuperada desde el historial).';
+        actualExplicacion.hidden = false;
+      } else if (estado === 'respaldo-activo') {
+        actual.classList.add('op-mh-current--backup');
+        insignia.className = 'op-mh-live-badge op-mh-live-badge--backup';
+        insignia.textContent = '📦 Copia del respaldo activa';
+        actualExplicacion.textContent = 'Estás trabajando sobre el documento que vino en la copia '
+          + 'de seguridad. Tu trabajo anterior está más abajo, marcado como resguardo.';
+        actualExplicacion.hidden = false;
+      }
+
       if (!versions.length) {
         const vacio = document.createElement('p');
         vacio.className = 'op-mh-intro';
@@ -3337,7 +3481,7 @@
         num.textContent = 'v' + v.versionNumber;
         tr.appendChild(num);
 
-        const origen = versionOrigin(v);
+        const origen = versionOrigin(v, versions);
         const tdOrigen = document.createElement('td');
         const tag = document.createElement('span');
         tag.className = 'op-mh-tag ' + origen.clase;
@@ -3356,18 +3500,10 @@
         when.textContent = formatDate(v.createdAt);
         tr.appendChild(when);
 
+        // Solo el autor: el motivo vive en la columna de origen, y repetirlo acá alargaba las
+        // filas hasta empujar los botones fuera de la vista.
         const who = document.createElement('td');
-        const quien = document.createElement('div');
-        quien.textContent = versionAuthor(v);
-        who.appendChild(quien);
-        // El comentario deja de vivir solo en un tooltip: es la única pista de por qué existe esa
-        // versión, y un tooltip no se descubre cuando uno está buscando su trabajo perdido.
-        if (v.comment) {
-          const detalle = document.createElement('div');
-          detalle.className = 'op-mh-comment';
-          detalle.textContent = v.comment;
-          who.appendChild(detalle);
-        }
+        who.textContent = versionAuthor(v);
         if (isSafetySnapshot(v)) {
           tr.classList.add('op-mh-row-safety');
         }
@@ -3378,6 +3514,8 @@
         tr.appendChild(size);
 
         const actions = document.createElement('td');
+        const grupo = document.createElement('div');
+        grupo.className = 'op-mh-actions';
         const bajar = document.createElement('button');
         bajar.type = 'button';
         bajar.className = 'op-btn-secondary';
@@ -3386,7 +3524,7 @@
           downloadVersion(file.id, v.versionNumber, file.originalFileName)
             .catch(function (err) { toast('No se pudo descargar: ' + err.message, 'error'); });
         };
-        actions.appendChild(bajar);
+        grupo.appendChild(bajar);
 
         const volver = document.createElement('button');
         volver.type = 'button';
@@ -3406,7 +3544,8 @@
             toast('No se pudo restaurar: ' + err.message, 'error');
           });
         };
-        actions.appendChild(volver);
+        grupo.appendChild(volver);
+        actions.appendChild(grupo);
         tr.appendChild(actions);
 
         tbody.appendChild(tr);
