@@ -134,7 +134,10 @@ class BackupRestoreServiceTest {
         });
 
         lenient().doAnswer(i -> {
-            stored.put(i.getArgument(0), i.<ByteArrayInputStream>getArgument(1).readAllBytes());
+            // InputStream y no ByteArrayInputStream: el contrato de store recibe la interfaz, y
+            // atar la prueba a la clase concreta la hacia fallar en cuanto el servicio dejo de
+            // cargar el binario entero en memoria para pasarlo en streaming desde disco.
+            stored.put(i.getArgument(0), i.<java.io.InputStream>getArgument(1).readAllBytes());
             return null;
         }).when(storageService).store(anyString(), any(), anyLong(), anyString());
 

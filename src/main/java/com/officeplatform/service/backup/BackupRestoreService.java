@@ -118,6 +118,9 @@ public class BackupRestoreService {
      */
     public static final String SAFETY_SNAPSHOT_COMMENT = "Resguardo local previo a restaurar copia de seguridad";
 
+    /** Bloque con el que se mueven los binarios entre el ZIP, el disco y el almacenamiento. */
+    private static final int TRANSFER_BUFFER = 64 * 1024;
+
     /** Accumulates counters and warnings while the restore walks the package. */
     private static final class Tally {
         int apiKeysCreated, apiKeysUpdated;
@@ -162,37 +165,92 @@ public class BackupRestoreService {
         // binarios bajo su jerarquía legible ("archivos/Proyecto/Carpeta/informe.docx") y declaran
         // esa ruta en el manifest; los antiguos usaban "files/{objectName}". Quedarse solo con el
         // prefijo viejo dejaría un backup nuevo sin un solo binario que restaurar.
-        Map<String, byte[]> zipEntries = new LinkedHashMap<>();
+        // Los binarios se vuelcan a un directorio temporal en lugar de quedarse en memoria. Antes
+        // el paquete entero se cargaba en un Map<String, byte[]>: medido, restaurar 80 MB usaba
+        // 232 MB de heap, y un respaldo de varios gigabytes —que es el tamaño real de una unidad
+        // de red corporativa— tumbaba la aplicación con OutOfMemory justo cuando más se la
+        // necesita. En disco, la memoria deja de depender del tamaño del respaldo.
+        Map<String, Path> zipEntries = new LinkedHashMap<>();
+        Path derrame = null;
 
-        try (ZipInputStream zis = new ZipInputStream(zipStream)) {
-            ZipEntry entry;
-            while ((entry = zis.getNextEntry()) != null) {
-                if (entry.isDirectory()) {
-                    zis.closeEntry();
-                    continue;
-                }
-                String name = entry.getName();
-                if (MANIFEST_ENTRY.equals(name)) {
-                    manifest = objectMapper.readTree(readEntry(zis));
-                } else {
-                    zipEntries.put(name, readEntry(zis));
-                }
-                zis.closeEntry();
+        try {
+            try {
+                derrame = Files.createTempDirectory("office-platform-restore-");
+            } catch (IOException e) {
+                // Sin lugar donde volcar el paquete no hay restauracion posible, y decirlo aca es
+                // mas util que fallar mas adelante con un error que no apunta a la causa.
+                throw new StorageException("No se pudo preparar el espacio temporal para restaurar: "
+                        + e.getMessage(), e);
             }
+            try (ZipInputStream zis = new ZipInputStream(
+                    new java.io.BufferedInputStream(zipStream, TRANSFER_BUFFER))) {
+                ZipEntry entry;
+                int secuencia = 0;
+                while ((entry = zis.getNextEntry()) != null) {
+                    if (entry.isDirectory()) {
+                        zis.closeEntry();
+                        continue;
+                    }
+                    String name = entry.getName();
+                    if (MANIFEST_ENTRY.equals(name)) {
+                        manifest = objectMapper.readTree(readEntry(zis));
+                    } else {
+                        // Nombre plano y correlativo: la ruta dentro del ZIP la elige quien arma el
+                        // paquete, y usarla para escribir en disco es la puerta del Zip Slip.
+                        Path destino = derrame.resolve("e" + (secuencia++) + ".bin");
+                        // Buffer propio de 64 KB: Files.copy usa bloques de 8 KB, y sobre un
+                        // paquete de gigabytes esa diferencia son millones de llamadas de mas.
+                        try (java.io.OutputStream out = new java.io.BufferedOutputStream(
+                                Files.newOutputStream(destino), TRANSFER_BUFFER)) {
+                            byte[] bloque = new byte[TRANSFER_BUFFER];
+                            int leidos;
+                            while ((leidos = zis.read(bloque)) != -1) {
+                                out.write(bloque, 0, leidos);
+                            }
+                        }
+                        zipEntries.put(name, destino);
+                    }
+                    zis.closeEntry();
+                }
+            } catch (IOException e) {
+                throw new IllegalArgumentException("El paquete de respaldo está corrupto o no es un ZIP válido: "
+                        + e.getMessage());
+            }
+
+            if (manifest == null) {
+                throw new IllegalArgumentException(
+                        "El paquete no contiene manifest.json; no parece una copia de seguridad de Office Platform.");
+            }
+
+            Tally tally = new Tally();
+            restoreMetadata(manifest, fileName, tally);
+            restoreBinaries(manifest.path("filesMetadata"), zipEntries, tally);
+            restoreBinaries(manifest.path("fileVersionsMetadata"), zipEntries, tally);
+            return buildResponse(fileName, tally);
+        } finally {
+            deleteQuietly(derrame);
+        }
+    }
+
+    /** Borra el volcado temporal sin dejar que un fallo ahí tape el resultado de la restauración. */
+    private void deleteQuietly(Path directorio) {
+        if (directorio == null) {
+            return;
+        }
+        try (java.util.stream.Stream<Path> contenido = Files.walk(directorio)) {
+            contenido.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (IOException ignored) {
+                    // El sistema operativo limpia su carpeta temporal; insistir no aporta.
+                }
+            });
         } catch (IOException e) {
-            throw new IllegalArgumentException("El paquete de respaldo está corrupto o no es un ZIP válido: "
-                    + e.getMessage());
+            log.warn("No se pudo borrar el volcado temporal '{}': {}", directorio, e.getMessage());
         }
+    }
 
-        if (manifest == null) {
-            throw new IllegalArgumentException(
-                    "El paquete no contiene manifest.json; no parece una copia de seguridad de Office Platform.");
-        }
-
-        Tally tally = new Tally();
-        restoreMetadata(manifest, fileName, tally);
-        restoreBinaries(manifest.path("filesMetadata"), zipEntries, tally);
-        restoreBinaries(manifest.path("fileVersionsMetadata"), zipEntries, tally);
+    private BackupRestoreResponse buildResponse(String fileName, Tally tally) {
 
         log.info("Restauración de '{}' completada: {} archivos, {} carpetas, {} permisos, "
                         + "{} versiones, {} binarios ({} omitidos)",
@@ -793,7 +851,7 @@ public class BackupRestoreService {
      * a failure here must not roll back metadata that is otherwise correct. Each failure is
      * recorded as a warning and the restore continues with the remaining files.
      */
-    private void restoreBinaries(JsonNode filesMetadata, Map<String, byte[]> zipEntries, Tally tally) {
+    private void restoreBinaries(JsonNode filesMetadata, Map<String, Path> zipEntries, Tally tally) {
         if (zipEntries.isEmpty()) {
             return;
         }
@@ -805,7 +863,7 @@ public class BackupRestoreService {
             if (objectName == null || objectName.isBlank()) {
                 continue;
             }
-            byte[] content = findBinary(node, objectName, zipEntries);
+            Path content = findBinary(node, objectName, zipEntries);
             if (content == null) {
                 tally.binariesSkipped++;
                 tally.warnings.add("El paquete no traía el binario de '"
@@ -813,8 +871,11 @@ public class BackupRestoreService {
                 continue;
             }
             String mimeType = textOr(node, "mimeType", "application/octet-stream");
-            try (InputStream in = new ByteArrayInputStream(content)) {
-                storageService.store(objectName, in, content.length, mimeType);
+            // Del disco al almacenamiento en streaming, con el tamaño ya conocido: el archivo nunca
+            // vuelve a existir entero en memoria.
+            try (InputStream in = new java.io.BufferedInputStream(
+                    Files.newInputStream(content), TRANSFER_BUFFER)) {
+                storageService.store(objectName, in, Files.size(content), mimeType);
                 tally.binariesRestored++;
             } catch (Exception e) {
                 tally.binariesSkipped++;
@@ -831,7 +892,7 @@ public class BackupRestoreService {
      * {@code files/{objectName}} de los paquetes antiguos. Ese respaldo no es opcional: los
      * backups ya generados tienen que seguir restaurándose después de esta versión.
      */
-    private static byte[] findBinary(JsonNode node, String objectName, Map<String, byte[]> zipEntries) {
+    private static Path findBinary(JsonNode node, String objectName, Map<String, Path> zipEntries) {
         String declared = text(node, "zipEntryPath");
         if (declared != null && zipEntries.containsKey(declared)) {
             return zipEntries.get(declared);

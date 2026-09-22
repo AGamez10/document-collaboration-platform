@@ -1059,29 +1059,53 @@
     /* ── Historial de versiones: estado actual y resguardos ─────────────── */
     .op-mh-current {
       border: 1px solid var(--op-border);
-      border-radius: 10px;
-      padding: 10px 12px;
+      border-left: 3px solid #2f9e44;
+      border-radius: 12px;
+      padding: 12px 14px;
       margin-bottom: var(--op-space-3);
       background: var(--op-bg-hover);
     }
-    .op-mh-current-title { font-size: 12px; font-weight: 600; color: var(--op-text); }
+    .op-mh-live-badge {
+      display: inline-block;
+      margin-bottom: 6px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: #1b6b32;
+      background: #d8f5df;
+      border: 1px solid #8ce0a5;
+    }
+    .op-mh-current-title { font-size: 13.5px; font-weight: 600; color: var(--op-text); }
     .op-mh-current-meta { font-size: 12.5px; color: var(--op-text-secondary); margin-top: 2px; }
     .op-mh-comment { font-size: 11.5px; color: var(--op-text-secondary); margin-top: 2px; }
-    .op-mh-safety {
+
+    .op-mh-tag {
       display: inline-block;
-      margin-top: 4px;
-      padding: 1px 7px;
+      padding: 2px 9px;
       border-radius: 999px;
       font-size: 11px;
       font-weight: 600;
-      color: #7a4b00;
-      background: #ffe8b3;
-      border: 1px solid #f0b429;
+      white-space: nowrap;
+    }
+    .op-mh-tag--safety { color: #7a4b00; background: #ffe8b3; border: 1px solid #f0b429; }
+    .op-mh-tag--editor { color: #14487a; background: #d7e9fb; border: 1px solid #8cbcea; }
+    .op-mh-tag--restored { color: #5b2d8e; background: #ece0fa; border: 1px solid #b795e0; }
+    .op-mh-tag-detail {
+      font-size: 11px;
+      color: var(--op-text-secondary);
+      margin-top: 3px;
+      max-width: 230px;
+      line-height: 1.35;
     }
     .op-mh-row-safety { background: rgba(240, 180, 41, 0.08); }
     .op-mh-safety-note { color: #7a4b00; }
     @media (prefers-color-scheme: dark) {
-      .op-mh-safety { color: #ffe8b3; background: rgba(240, 180, 41, 0.18); }
+      .op-mh-live-badge { color: #b7f0c6; background: rgba(47, 158, 68, 0.2); border-color: #2f9e44; }
+      .op-mh-tag--safety { color: #ffe8b3; background: rgba(240, 180, 41, 0.18); }
+      .op-mh-tag--editor { color: #b9d9f7; background: rgba(60, 130, 200, 0.18); }
+      .op-mh-tag--restored { color: #d9c2f5; background: rgba(140, 90, 200, 0.2); }
       .op-mh-safety-note { color: #f0c568; }
     }
 
@@ -3189,6 +3213,54 @@
     return !!(version && version.comment && version.comment.indexOf(SAFETY_SNAPSHOT_MARK) >= 0);
   }
 
+  /**
+   * De dónde salió cada versión, leído de su comentario.
+   *
+   * <p>Un número de versión no dice nada: "v7" no le explica a nadie por qué existe ni si es la
+   * que está buscando. El origen sí, y es lo primero que mira quien entra acá después de perder
+   * un trabajo.
+   */
+  function versionOrigin(version) {
+    const comentario = (version && version.comment) || '';
+    if (isSafetySnapshot(version)) {
+      return {
+        clase: 'op-mh-tag--safety',
+        etiqueta: '🛡️ Resguardo pre-respaldo',
+        detalle: 'Tu trabajo local antes de restaurar el backup. Tocá Restaurar para recuperarlo.',
+        titulo: 'Un administrador restauró una copia de seguridad sobre este archivo. Esta versión '
+          + 'guarda lo que vos tenías justo antes.',
+      };
+    }
+    if (comentario.indexOf('restaurar la versión') >= 0) {
+      return {
+        clase: 'op-mh-tag--restored',
+        etiqueta: '📦 Versión restaurada',
+        detalle: '',
+        titulo: 'Este era el estado del archivo antes de que alguien restaurara otra versión.',
+      };
+    }
+    return {
+      clase: 'op-mh-tag--editor',
+      etiqueta: '💾 Edición en línea',
+      detalle: '',
+      titulo: 'Estado previo a un guardado hecho desde el editor.',
+    };
+  }
+
+  /**
+   * Nombre presentable de quien dejó una versión.
+   *
+   * <p>Una cédula suelta no le dice nada a nadie: si lo único que hay es el identificador, es
+   * preferible decir cuándo pasó a mostrar un número que el lector no reconoce.
+   */
+  function versionAuthor(version) {
+    const nombre = version && version.createdByName;
+    if (nombre && !/^\d+$/.test(String(nombre).trim())) {
+      return nombre;
+    }
+    return 'Modificado recientemente';
+  }
+
   function showVersionHistory(file) {
     const shell = buildModalShell('Historial de versiones');
     const intro = document.createElement('p');
@@ -3200,15 +3272,22 @@
     // compararlas: la pregunta que trae a alguien acá es "¿qué tengo abierto y qué había antes?".
     const actual = document.createElement('div');
     actual.className = 'op-mh-current';
-    const actualTitulo = document.createElement('div');
-    actualTitulo.className = 'op-mh-current-title';
-    actualTitulo.textContent = 'Versión activa';
+
+    const insignia = document.createElement('span');
+    insignia.className = 'op-mh-live-badge';
+    insignia.textContent = '🟢 Versión vigente en el editor';
+    actual.appendChild(insignia);
+
+    const actualNombre = document.createElement('div');
+    actualNombre.className = 'op-mh-current-title';
+    actualNombre.textContent = file.originalFileName;
+    actual.appendChild(actualNombre);
+
     const actualDetalle = document.createElement('div');
     actualDetalle.className = 'op-mh-current-meta';
     actualDetalle.textContent = formatBytes(file.size || 0)
       + ' · ' + formatDate(file.updatedAt || file.createdAt)
-      + ' · ' + (file.updatedByName || file.createdByName || '—');
-    actual.appendChild(actualTitulo);
+      + ' · ' + versionAuthor({ createdByName: file.updatedByName || file.createdByName });
     actual.appendChild(actualDetalle);
     shell.body.appendChild(actual);
 
@@ -3247,8 +3326,8 @@
 
       const table = document.createElement('table');
       table.className = 'op-mh-table';
-      table.innerHTML = '<thead><tr><th>Versión</th><th>Cuándo</th><th>Quién</th>'
-        + '<th>Tamaño</th><th></th></tr></thead>';
+      table.innerHTML = '<thead><tr><th>Versión</th><th>Origen / motivo</th><th>Cuándo</th>'
+        + '<th>Quién</th><th>Tamaño</th><th></th></tr></thead>';
       const tbody = document.createElement('tbody');
 
       versions.forEach(function (v) {
@@ -3258,16 +3337,31 @@
         num.textContent = 'v' + v.versionNumber;
         tr.appendChild(num);
 
+        const origen = versionOrigin(v);
+        const tdOrigen = document.createElement('td');
+        const tag = document.createElement('span');
+        tag.className = 'op-mh-tag ' + origen.clase;
+        tag.textContent = origen.etiqueta;
+        tag.title = origen.titulo;
+        tdOrigen.appendChild(tag);
+        if (origen.detalle) {
+          const sub = document.createElement('div');
+          sub.className = 'op-mh-tag-detail';
+          sub.textContent = origen.detalle;
+          tdOrigen.appendChild(sub);
+        }
+        tr.appendChild(tdOrigen);
+
         const when = document.createElement('td');
         when.textContent = formatDate(v.createdAt);
         tr.appendChild(when);
 
         const who = document.createElement('td');
         const quien = document.createElement('div');
-        quien.textContent = v.createdByName || v.createdByUserId || '—';
+        quien.textContent = versionAuthor(v);
         who.appendChild(quien);
-        // El comentario deja de vivir solo en un tooltip: es la unica pista de por que existe
-        // esa version, y un tooltip no se descubre cuando uno esta buscando su trabajo perdido.
+        // El comentario deja de vivir solo en un tooltip: es la única pista de por qué existe esa
+        // versión, y un tooltip no se descubre cuando uno está buscando su trabajo perdido.
         if (v.comment) {
           const detalle = document.createElement('div');
           detalle.className = 'op-mh-comment';
@@ -3275,12 +3369,6 @@
           who.appendChild(detalle);
         }
         if (isSafetySnapshot(v)) {
-          const marca = document.createElement('span');
-          marca.className = 'op-mh-safety';
-          marca.textContent = 'Resguardo de seguridad';
-          marca.title = 'Esta versión contiene el trabajo que tenías antes de restaurar la copia '
-            + 'de seguridad. Podés volver a ella con el botón Restaurar.';
-          who.appendChild(marca);
           tr.classList.add('op-mh-row-safety');
         }
         tr.appendChild(who);
@@ -3307,7 +3395,10 @@
         volver.onclick = function () {
           volver.disabled = true;
           restoreVersion(file.id, v.versionNumber).then(function () {
-            toast('Versión v' + v.versionNumber + ' restaurada', 'success');
+            // Decir que lo anterior se conservó es la mitad del mensaje: sin eso, restaurar
+            // se siente como una operación sin vuelta atrás y la gente no la usa.
+            toast('Versión v' + v.versionNumber + ' restaurada. Tu versión actual se conservó '
+              + 'en el historial.', 'success');
             closeModal();
             loadFiles();
           }).catch(function (err) {
