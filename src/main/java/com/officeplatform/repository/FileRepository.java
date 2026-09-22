@@ -211,6 +211,26 @@ public interface FileRepository extends JpaRepository<FileEntity, Long> {
     List<FileEntity> searchSharedByNameOrContent(@Param("apiKeyId") Long apiKeyId,
                                                  @Param("term") String term);
 
+    /**
+     * Todo lo que esta persona puede ver en el proyecto: lo suyo y lo del espacio compartido.
+     *
+     * <p>Buscar solo dentro de la pestaña abierta obligaba a recordar dónde se había guardado el
+     * documento, que es exactamente lo que uno no recuerda cuando lo está buscando. El aislamiento
+     * entre espacios sigue siendo estricto para listar y para permisos; para buscar no tiene
+     * sentido, porque los dos espacios ya son accesibles para esta persona.
+     *
+     * <p>Lo privado de <b>otro</b> queda afuera: la condición exige user_id nulo —del proyecto— o
+     * igual a quien busca.
+     */
+    @Query("select f from FileEntity f where f.apiKeyId = :apiKeyId "
+         + "and (f.userId is null or f.userId = :userId) "
+         + "and f.deletedAt is null "
+         + "and (lower(f.originalFileName) like lower(concat('%', :term, '%')) "
+         + "  or lower(f.searchContent) like lower(concat('%', :term, '%')))")
+    List<FileEntity> searchAccessibleByNameOrContent(@Param("apiKeyId") Long apiKeyId,
+                                                     @Param("userId") String userId,
+                                                     @Param("term") String term);
+
 
     /**
      * Ids de los archivos vivos que todavia no tienen texto extraido.

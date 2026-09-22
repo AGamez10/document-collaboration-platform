@@ -232,15 +232,28 @@ public class FileServiceImpl implements FileService {
             return List.of();
         }
         String query = term.trim();
+        String resolvedUserId = (userId != null && !userId.isBlank()) ? userId.trim() : null;
+
         // Busca por nombre Y por contenido: un procedimiento que nadie recuerda como se llama se
         // encuentra por una frase que si recuerda haber leido adentro.
         if ("shared".equalsIgnoreCase(scope)) {
             return fileRepository.searchSharedByNameOrContent(apiKeyId, query);
         }
-        if (userId == null || userId.isBlank()) {
-            return List.of();
+        if ("private".equalsIgnoreCase(scope)) {
+            return resolvedUserId == null
+                    ? List.of()
+                    : fileRepository.searchByNameOrContentForUser(apiKeyId, resolvedUserId, query);
         }
-        return fileRepository.searchByNameOrContentForUser(apiKeyId, userId.trim(), query);
+
+        // Sin scope explicito la busqueda abarca todo lo accesible. Antes caia en "lo privado de
+        // quien busca", asi que un documento del area no aparecia hasta cambiar de pestaña: para
+        // encontrarlo habia que saber de antemano donde estaba guardado, que es justo lo que uno
+        // no sabe cuando lo busca.
+        if (resolvedUserId == null) {
+            // Un llamador sin identidad no tiene espacio privado que mirar; lo compartido, si.
+            return fileRepository.searchSharedByNameOrContent(apiKeyId, query);
+        }
+        return fileRepository.searchAccessibleByNameOrContent(apiKeyId, resolvedUserId, query);
     }
 
     @Override

@@ -758,7 +758,8 @@ public class FileController {
                 // matchedByContent y restricted: ambos son marcas de presentacion que el
                 // endpoint correspondiente sobreescribe cuando aplica.
                 false,
-                false);
+                false,
+                fileEntity.getUserId() == null);
     }
 
 }

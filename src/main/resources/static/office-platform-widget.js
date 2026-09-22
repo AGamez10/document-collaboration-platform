@@ -1755,14 +1755,23 @@
     return j.data || [];
   }
 
+  /**
+   * Busca en todo lo que la persona puede ver, no solo en la pestaña abierta.
+   *
+   * <p>Antes mandaba el scope actual, así que un documento del área no aparecía hasta cambiar de
+   * pestaña: para encontrarlo había que saber de antemano dónde estaba guardado, que es
+   * exactamente lo que uno no sabe cuando lo está buscando. El backend sigue excluyendo lo
+   * privado de terceros; "todo" es todo lo accesible, no todo lo que existe.
+   */
   async function searchFilesApi(term) {
-    const scope = getCurrentScope();
-    const res = await apiFetch('/api/files/search?scope=' + scope + '&q=' + encodeURIComponent(term));
+    const res = await apiFetch('/api/files/search?scope=all&q=' + encodeURIComponent(term));
     const j = await res.json();
     return j.data || [];
   }
 
   async function searchFoldersApi(term) {
+    // Las carpetas siguen el scope de la pestaña: una carpeta es una ubicación, y ofrecer la de
+    // otro espacio llevaría a navegar fuera de donde la persona está parada.
     const scope = getCurrentScope();
     const res = await apiFetch('/api/folders/search?scope=' + scope + '&q=' + encodeURIComponent(term));
     const j = await res.json();
@@ -4993,6 +5002,11 @@
     if (file.matchedByContent) {
       metaText = 'En contenido · ' + metaText;
     }
+    // Con la búsqueda abarcando los dos espacios, un resultado sin ubicación obliga a abrir las
+    // dos pestañas para encontrarlo.
+    if (state.search && state.search.trim()) {
+      metaText = (file.sharedSpace ? 'Compartidos' : 'Mis Archivos') + ' · ' + metaText;
+    }
     const fileModifier = file.updatedByName || file.createdByName;
     if (state.section === 'shared') {
       if (fileModifier) metaText += ' · Modificado por: ' + fileModifier;
@@ -5126,6 +5140,14 @@
 
     const tdSize = document.createElement('td');
     tdSize.textContent = formatBytes(file.size || 0);
+    if (state.search && state.search.trim()) {
+      const lugar = document.createElement('span');
+      lugar.className = 'op-badge-content';
+      lugar.textContent = file.sharedSpace ? 'Compartidos' : 'Mis Archivos';
+      lugar.title = 'Espacio donde vive este archivo';
+      tdType.appendChild(document.createTextNode(' '));
+      tdType.appendChild(lugar);
+    }
     if (file.matchedByContent) {
       const badge = document.createElement('span');
       badge.className = 'op-badge-content';

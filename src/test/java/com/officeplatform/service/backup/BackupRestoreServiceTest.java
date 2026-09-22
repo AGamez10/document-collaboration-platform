@@ -72,6 +72,7 @@ class BackupRestoreServiceTest {
     @Mock private KnownUserRepository knownUserRepository;
     @Mock private SharePermissionRepository sharePermissionRepository;
     @Mock private com.officeplatform.repository.FileVersionRepository fileVersionRepository;
+    @Mock private com.officeplatform.service.search.FileIndexingService fileIndexingService;
     @Mock private StorageService storageService;
     @Mock private PlatformTransactionManager transactionManager;
 
@@ -184,7 +185,7 @@ class BackupRestoreServiceTest {
 
         service = new BackupRestoreService(fileRepository, folderRepository, apiKeyRepository,
                 knownUserRepository, sharePermissionRepository, fileVersionRepository,
-                storageService, objectMapper, transactionManager, BUCKET);
+                fileIndexingService, storageService, objectMapper, transactionManager, BUCKET);
     }
 
     // ── package builders ─────────────────────────────────────────────────────

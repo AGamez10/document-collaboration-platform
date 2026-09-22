@@ -47,4 +47,13 @@ public class FileResponse {
 
     private boolean restricted;
 
+    /**
+     * Si el archivo vive en el espacio compartido del proyecto o en "Mis Archivos".
+     *
+     * <p>Existe por la busqueda global: un resultado que aparece sin decir de donde sale obliga a
+     * abrir las dos pestañas para encontrarlo. Se deriva de {@code user_id} en lugar de exponerlo,
+     * porque la cedula del dueño no es asunto de quien busca.
+     */
+    private boolean sharedSpace;
+
 }

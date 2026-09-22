@@ -76,6 +76,7 @@ public class BackupRestoreService {
     private final KnownUserRepository knownUserRepository;
     private final SharePermissionRepository sharePermissionRepository;
     private final com.officeplatform.repository.FileVersionRepository fileVersionRepository;
+    private final com.officeplatform.service.search.FileIndexingService fileIndexingService;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
@@ -88,6 +89,7 @@ public class BackupRestoreService {
             KnownUserRepository knownUserRepository,
             SharePermissionRepository sharePermissionRepository,
             com.officeplatform.repository.FileVersionRepository fileVersionRepository,
+            com.officeplatform.service.search.FileIndexingService fileIndexingService,
             StorageService storageService,
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
@@ -98,6 +100,7 @@ public class BackupRestoreService {
         this.knownUserRepository = knownUserRepository;
         this.sharePermissionRepository = sharePermissionRepository;
         this.fileVersionRepository = fileVersionRepository;
+        this.fileIndexingService = fileIndexingService;
         this.storageService = storageService;
         this.objectMapper = objectMapper;
         // An explicit template rather than @Transactional on a method of this same bean: that
@@ -190,6 +193,12 @@ public class BackupRestoreService {
                 tally.versionsCreated + tally.versionsUpdated,
                 tally.binariesRestored, tally.binariesSkipped);
 
+        // Lo restaurado entra por una puerta que no pasa por la indexación: las filas vuelven
+        // del manifest con su texto o sin él, y los binarios se escriben directamente en el
+        // almacenamiento. Sin esto, después de restaurar un respaldo la búsqueda por contenido
+        // devolvía vacío sobre un catálogo entero, sin que nada explicara por qué.
+        indexRestoredFiles();
+
         return BackupRestoreResponse.builder()
                 .fileName(fileName)
                 .restoredAt(LocalDateTime.now())
@@ -230,6 +239,26 @@ public class BackupRestoreService {
             // fila imposible de abrir.
             restoreFileVersions(manifest.path("fileVersionsMetadata"), fileIds, tally);
         });
+    }
+
+    /**
+     * Encola en segundo plano el texto de lo que quedó sin extraer tras la restauración.
+     *
+     * <p>No espera a que termine ni propaga errores: la restauración ya escribió lo importante, y
+     * hacerla fallar porque un documento no se pudo leer sería cambiar un problema de búsqueda por
+     * uno de recuperación.
+     */
+    private void indexRestoredFiles() {
+        try {
+            List<Long> pendientes = fileRepository.findIdsPendingIndexing();
+            if (pendientes.isEmpty()) {
+                return;
+            }
+            log.info("Restauración: {} archivo(s) encolados para extraer su texto", pendientes.size());
+            fileIndexingService.reindexPendingAsync(pendientes);
+        } catch (Exception e) {
+            log.warn("No se pudo encolar el indexado tras la restauración: {}", e.getMessage());
+        }
     }
 
     /**

@@ -65,6 +65,11 @@ office-platform:
       secret: ${ONLYOFFICE_JWT_SECRET:changeme-onlyoffice-secret-key32}
   cors:
     allowed-origins: ${OFFICE_PLATFORM_CORS_ALLOWED_ORIGINS:*}
+  search:
+    # Al arrancar, encola en segundo plano el texto de los archivos vivos que no lo tengan. Cubre
+    # lo que entra por fuera de una subida: restauraciones, ingestas masivas y lo anterior a que
+    # existiera la busqueda por contenido.
+    index-on-startup: ${OFFICE_PLATFORM_INDEX_ON_STARTUP:true}
   versions:
     # Versiones que se conservan por archivo. Cada guardado del editor archiva una copia completa
     # del estado previo, y esas copias no cuentan contra la cuota del proyecto: sin techo, el disco
