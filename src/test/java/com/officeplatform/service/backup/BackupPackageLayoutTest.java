@@ -57,6 +57,7 @@ class BackupPackageLayoutTest {
     @Mock private ApiKeyRepository apiKeyRepository;
     @Mock private KnownUserRepository knownUserRepository;
     @Mock private SharePermissionRepository sharePermissionRepository;
+    @Mock private com.officeplatform.repository.FileVersionRepository fileVersionRepository;
     @Mock private StorageService storageService;
     @Mock private BackupRestoreService backupRestoreService;
 
@@ -78,8 +79,90 @@ class BackupPackageLayoutTest {
                 new ByteArrayInputStream(("bytes de " + i.getArgument(0)).getBytes(StandardCharsets.UTF_8)));
 
         return new BackupServiceImpl(fileRepository, folderRepository, apiKeyRepository,
-                knownUserRepository, sharePermissionRepository, storageService, dir.toString(),
+                knownUserRepository, sharePermissionRepository, fileVersionRepository,
+                storageService, dir.toString(),
                 false, 24, 10, "", false, backupRestoreService);
+    }
+
+    /** Una versión archivada de un archivo, como la que deja cada guardado del editor. */
+    private com.officeplatform.entity.FileVersionEntity version(Long fileId, int numero, String extension) {
+        return com.officeplatform.entity.FileVersionEntity.builder()
+                .id((long) (fileId * 100 + numero))
+                .fileId(fileId)
+                .versionNumber(numero)
+                .objectName("versions/uuid-" + fileId + "/v" + numero + "." + extension)
+                .size(1024L)
+                .createdByName("Ana")
+                .createdByUserId("111")
+                .createdAt(java.time.LocalDateTime.now())
+                .comment("Estado previo a un guardado desde el editor")
+                .build();
+    }
+
+    // ── historial de versiones ───────────────────────────────────────────────
+
+    @Test
+    @DisplayName("the version history travels in the package instead of vanishing")
+    void packagesTheVersionHistory(@TempDir Path dir) throws Exception {
+        // El agujero que esto cierra: el manifest no declaraba el historial y el ZIP no lo
+        // llevaba, así que una recuperación ante desastre devolvía los documentos sin una sola
+        // versión anterior, sin error y sin aviso. Poder volver a lo de ayer es justamente lo que
+        // una carpeta compartida de Windows no ofrece.
+        lenient().when(fileVersionRepository.findAll())
+                .thenReturn(List.of(version(31L, 1, "docx"), version(31L, 2, "docx")));
+
+        BackupServiceImpl service = serviceOn(dir,
+                List.of(file(31L, 21L, "informe.docx", 3L)),
+                List.of(folder(20L, null, "Informes", 3L), folder(21L, 20L, "Semana 36", 3L)),
+                List.of(key(3L, "Proyecto X")));
+
+        BackupInfoResponse info = service.createBackup("MANUAL");
+        JsonNode manifest = manifestOf(dir, info.getFileName());
+
+        assertThat(manifest.get("totalFileVersions").asInt()).isEqualTo(2);
+        JsonNode primera = manifest.get("fileVersionsMetadata").get(0);
+        // Sin objectName el restaurador no sabría bajo qué clave devolver el binario.
+        assertThat(primera.get("objectName").asText()).isEqualTo("versions/uuid-31/v1.docx");
+        assertThat(primera.get("fileId").asLong()).isEqualTo(31L);
+        assertThat(primera.get("versionNumber").asInt()).isEqualTo(1);
+
+        List<String> names = entriesOf(dir, info.getFileName());
+        assertThat(names).contains(
+                "versiones/Proyecto X/Compartidos por Area/Informes/Semana 36/informe.docx/v1.docx",
+                "versiones/Proyecto X/Compartidos por Area/Informes/Semana 36/informe.docx/v2.docx");
+    }
+
+    @Test
+    @DisplayName("a version whose file has no place still keeps its binary")
+    void packagesAVersionEvenWithoutAReadablePath(@TempDir Path dir) throws Exception {
+        // El archivo no está en el paquete: su ruta legible no existe. Perder el binario por no
+        // saber dónde ponerlo sería el peor desenlace posible para un respaldo.
+        lenient().when(fileVersionRepository.findAll()).thenReturn(List.of(version(99L, 1, "docx")));
+
+        BackupServiceImpl service = serviceOn(dir, List.of(), List.of(), List.of(key(3L, "Proyecto X")));
+
+        BackupInfoResponse info = service.createBackup("MANUAL");
+
+        assertThat(entriesOf(dir, info.getFileName()))
+                .anyMatch(n -> n.startsWith("versiones/_sin_ubicacion/"));
+    }
+
+    @Test
+    @DisplayName("a version binary missing from storage does not abort the package")
+    void survivesAVersionBinaryThatIsGone(@TempDir Path dir) throws Exception {
+        lenient().when(fileVersionRepository.findAll()).thenReturn(List.of(version(31L, 1, "docx")));
+
+        BackupServiceImpl service = serviceOn(dir,
+                List.of(file(31L, null, "informe.docx", 3L)),
+                List.of(), List.of(key(3L, "Proyecto X")));
+        lenient().when(storageService.retrieve("versions/uuid-31/v1.docx"))
+                .thenThrow(new RuntimeException("no está en MinIO"));
+
+        BackupInfoResponse info = service.createBackup("MANUAL");
+
+        // El archivo vigente sigue en el paquete: una versión perdida no puede costar el respaldo.
+        assertThat(info.getFilesCount()).isEqualTo(1);
+        assertThat(manifestOf(dir, info.getFileName()).get("totalFileVersions").asInt()).isEqualTo(1);
     }
 
     private KnownUserEntity user(Long apiKeyId, String userId, String displayName) {
@@ -185,7 +268,7 @@ class BackupPackageLayoutTest {
         JsonNode manifest = manifestOf(dir, info.getFileName());
         JsonNode file = manifest.get("filesMetadata").get(0);
 
-        assertThat(manifest.get("layoutVersion").asInt()).isEqualTo(3);
+        assertThat(manifest.get("layoutVersion").asInt()).isEqualTo(4);
         assertThat(file.get("zipEntryPath").asText())
                 .isEqualTo("archivos/Proyecto X/Compartidos por Area/Informes/Semana 36/informe.docx");
         // Sin objectName el restaurador no sabría bajo qué clave devolverlo al almacenamiento.

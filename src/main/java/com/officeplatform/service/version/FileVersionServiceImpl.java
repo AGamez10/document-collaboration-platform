@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,14 +34,32 @@ public class FileVersionServiceImpl implements FileVersionService {
     private final StorageService storageService;
     private final ActivityLogRecorder activityLogRecorder;
 
+    /**
+     * Cuántas versiones se conservan por archivo.
+     *
+     * <p>Cada guardado del editor archiva una copia completa del estado previo, así que sin techo
+     * el historial crece con cada pulsación de guardar y no lo borra nadie: una planilla de 20 MB
+     * coeditada durante un mes deja varios gigabytes que además no cuentan contra la cuota del
+     * proyecto, porque la cuota solo mide archivos vivos. El disco se llena sin que ningún número
+     * de la consola lo anticipe.
+     *
+     * <p>Veinte es el corte por defecto porque cubre con holgura el caso real —volver a lo de
+     * ayer, o a lo de antes de que alguien rompiera una fórmula— sin guardar un año de pulsaciones.
+     * En cero o negativo la poda se desactiva, para quien necesite historial completo y tenga
+     * disco para sostenerlo.
+     */
+    private final int maxVersionsPerFile;
+
     public FileVersionServiceImpl(FileVersionRepository fileVersionRepository,
                                   FileRepository fileRepository,
                                   StorageService storageService,
-                                  ActivityLogRecorder activityLogRecorder) {
+                                  ActivityLogRecorder activityLogRecorder,
+                                  @Value("${office-platform.versions.max-per-file:20}") int maxVersionsPerFile) {
         this.fileVersionRepository = fileVersionRepository;
         this.fileRepository = fileRepository;
         this.storageService = storageService;
         this.activityLogRecorder = activityLogRecorder;
+        this.maxVersionsPerFile = maxVersionsPerFile;
     }
 
     @Override
@@ -68,7 +87,7 @@ public class FileVersionServiceImpl implements FileVersionService {
             storageService.store(objectName, new ByteArrayInputStream(current), current.length,
                     file.getMimeType());
 
-            return fileVersionRepository.save(FileVersionEntity.builder()
+            FileVersionEntity archivada = fileVersionRepository.save(FileVersionEntity.builder()
                     .fileId(file.getId())
                     .versionNumber(next)
                     .objectName(objectName)
@@ -78,12 +97,55 @@ public class FileVersionServiceImpl implements FileVersionService {
                     .createdAt(LocalDateTime.now())
                     .comment(comment)
                     .build());
+
+            pruneOldVersions(file.getId());
+            return archivada;
         } catch (Exception e) {
             // Deliberadamente silencioso hacia arriba. Esto corre dentro del guardado del editor:
             // perder una versión es lamentable, perder el trabajo que la persona acaba de guardar
             // es inaceptable.
             log.warn("No se pudo archivar la versión del archivo {}: {}", file.getId(), e.getMessage());
             return null;
+        }
+    }
+
+    /**
+     * Descarta las versiones más viejas cuando el archivo pasa el tope.
+     *
+     * <p>Se podan las de número más bajo: el historial sirve para volver atrás unos pasos, y el
+     * estado de hace ochenta guardados no es un destino al que nadie vuelva. La numeración no se
+     * reutiliza, así que después de podar quedan huecos y eso es correcto — la versión 3 existió
+     * y ya no está, que es distinto de que nunca haya existido.
+     *
+     * <p>Nunca propaga errores, por el mismo motivo que {@code archiveCurrent}: esto corre dentro
+     * del guardado del editor, y no poder liberar disco no puede costarle a nadie su trabajo.
+     */
+    private void pruneOldVersions(Long fileId) {
+        if (maxVersionsPerFile <= 0) {
+            return;
+        }
+        try {
+            List<FileVersionEntity> todas = fileVersionRepository
+                    .findAllByFileIdOrderByVersionNumberDesc(fileId);
+            if (todas.size() <= maxVersionsPerFile) {
+                return;
+            }
+            List<FileVersionEntity> sobrantes = todas.subList(maxVersionsPerFile, todas.size());
+            for (FileVersionEntity vieja : sobrantes) {
+                // El binario se borra fuera de la fila: si el objeto ya no está, la fila igual
+                // debe irse, o el historial seguiría contando versiones que no se pueden abrir.
+                try {
+                    storageService.delete(vieja.getObjectName());
+                } catch (Exception e) {
+                    log.warn("No se pudo borrar el binario de la versión podada {}: {}",
+                            vieja.getObjectName(), e.getMessage());
+                }
+            }
+            fileVersionRepository.deleteAll(sobrantes);
+            log.info("Historial del archivo {}: {} versión(es) podada(s), se conservan las {} más recientes",
+                    fileId, sobrantes.size(), maxVersionsPerFile);
+        } catch (Exception e) {
+            log.warn("No se pudo podar el historial del archivo {}: {}", fileId, e.getMessage());
         }
     }
 

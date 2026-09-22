@@ -65,6 +65,7 @@ public class BackupServiceImpl implements BackupService {
     private final ApiKeyRepository apiKeyRepository;
     private final KnownUserRepository knownUserRepository;
     private final SharePermissionRepository sharePermissionRepository;
+    private final com.officeplatform.repository.FileVersionRepository fileVersionRepository;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
     private final BackupRestoreService backupRestoreService;
@@ -83,6 +84,7 @@ public class BackupServiceImpl implements BackupService {
             ApiKeyRepository apiKeyRepository,
             KnownUserRepository knownUserRepository,
             SharePermissionRepository sharePermissionRepository,
+            com.officeplatform.repository.FileVersionRepository fileVersionRepository,
             StorageService storageService,
             @Value("${office-platform.backup.directory:backups}") String backupDirectoryPath,
             @Value("${office-platform.backup.auto-enabled:true}") boolean autoBackupEnabled,
@@ -97,6 +99,7 @@ public class BackupServiceImpl implements BackupService {
 
         this.fileRepository = fileRepository;
         this.folderRepository = folderRepository;
+        this.fileVersionRepository = fileVersionRepository;
         this.apiKeyRepository = apiKeyRepository;
         this.knownUserRepository = knownUserRepository;
         this.sharePermissionRepository = sharePermissionRepository;
@@ -185,6 +188,7 @@ public class BackupServiceImpl implements BackupService {
         List<ApiKeyEntity> allApiKeys = apiKeyRepository.findAll();
         List<KnownUserEntity> allUsers = knownUserRepository.findAll();
         List<SharePermissionEntity> allSharePermissions = sharePermissionRepository.findAll();
+        List<com.officeplatform.entity.FileVersionEntity> allVersions = fileVersionRepository.findAll();
 
         // Las rutas se resuelven antes de escribir nada porque el manifest va primero en el ZIP y
         // tiene que declarar dónde quedó cada binario.
@@ -232,6 +236,23 @@ public class BackupServiceImpl implements BackupService {
             filesMetadata.add(node);
         }
 
+        // El historial pesa tanto como el documento y desaparecía entero en cada respaldo: el
+        // manifest no lo declaraba y el ZIP no lo llevaba, así que una recuperación ante desastre
+        // devolvía los archivos sin una sola versión anterior, sin error y sin aviso. Poder volver
+        // a lo de ayer es justamente lo que una carpeta compartida de Windows no ofrece.
+        List<Map<String, Object>> versionsMetadata = new ArrayList<>(allVersions.size());
+        Map<String, String> versionPathByObject = new HashMap<>();
+        for (com.officeplatform.entity.FileVersionEntity version : allVersions) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> node = objectMapper.convertValue(version, Map.class);
+            if (version.getObjectName() != null && !version.getObjectName().isBlank()) {
+                String entryPath = buildVersionPath(version, pathByFileId, usedPaths);
+                node.put("zipEntryPath", entryPath);
+                versionPathByObject.put(version.getObjectName(), entryPath);
+            }
+            versionsMetadata.add(node);
+        }
+
         // Vista de contingencia: copias de lo que a cada persona le compartieron, para que al abrir
         // el ZIP sin servidor encuentre en su propia carpeta lo que en el gestor ve bajo
         // "Compartidos conmigo". Estas rutas NO viajan en filesMetadata a propósito: son copias
@@ -244,12 +265,13 @@ public class BackupServiceImpl implements BackupService {
         manifest.put("createdAt", now.toString());
         // Marca de formato: 2 introdujo zipEntryPath, 3 agrega los permisos y la segmentación por
         // usuario. El restaurador la lee para saber en qué puede confiar.
-        manifest.put("layoutVersion", 3);
+        manifest.put("layoutVersion", 4);
         manifest.put("totalFiles", allFiles.size());
         manifest.put("totalFolders", allFolders.size());
         manifest.put("totalApiKeys", allApiKeys.size());
         manifest.put("totalKnownUsers", allUsers.size());
         manifest.put("totalSharePermissions", allSharePermissions.size());
+        manifest.put("totalFileVersions", allVersions.size());
         manifest.put("filesMetadata", filesMetadata);
         manifest.put("foldersMetadata", allFolders);
         manifest.put("apiKeysMetadata", allApiKeys);
@@ -257,8 +279,10 @@ public class BackupServiceImpl implements BackupService {
         // Sin esto, restaurar devolvía los archivos pero abría el acceso: cada restricción, nota y
         // vencimiento desaparecía, y lo que estaba limitado a una persona quedaba a la vista.
         manifest.put("sharePermissionsMetadata", allSharePermissions);
+        manifest.put("fileVersionsMetadata", versionsMetadata);
 
         int writtenFiles = 0;
+        int writtenVersions = 0;
         try (FileOutputStream fos = new FileOutputStream(zipPath.toFile());
              ZipOutputStream zos = new ZipOutputStream(fos)) {
 
@@ -305,6 +329,25 @@ public class BackupServiceImpl implements BackupService {
                     writtenFiles++;
                 } catch (Exception ex) {
                     log.warn("No se pudo incluir el archivo binario {} en el backup: {}", file.getObjectName(), ex.getMessage());
+                }
+            }
+
+            // 3. Los binarios del historial, después de los vigentes. Un fallo acá se registra y
+            // sigue: perder una versión vieja es lamentable, perder el respaldo entero por ella
+            // sería absurdo.
+            for (com.officeplatform.entity.FileVersionEntity version : allVersions) {
+                String entryPath = versionPathByObject.get(version.getObjectName());
+                if (entryPath == null) {
+                    continue;
+                }
+                try (InputStream stream = storageService.retrieve(version.getObjectName())) {
+                    zos.putNextEntry(new ZipEntry(entryPath));
+                    stream.transferTo(zos);
+                    zos.closeEntry();
+                    writtenVersions++;
+                } catch (Exception ex) {
+                    log.warn("No se pudo incluir la versión {} en el backup: {}",
+                            version.getObjectName(), ex.getMessage());
                 }
             }
 
@@ -380,6 +423,34 @@ public class BackupServiceImpl implements BackupService {
 
         path.append(safeName(readableName(file)));
         return deduplicate(path.toString(), usedPaths);
+    }
+
+    /**
+     * Ruta del binario de una versión dentro del ZIP.
+     *
+     * <p>Cuelga de {@code versiones/} con la misma ruta legible del archivo al que pertenece, así
+     * quien abre el paquete en el Explorador encuentra el historial de "Procedimientos/manual.docx"
+     * bajo "versiones/Procedimientos/manual.docx/v3.docx" y no bajo un UUID. Si el archivo ya no
+     * tiene ruta —porque su fila se perdió—, la versión queda igualmente guardada bajo su nombre
+     * de objeto: el binario existe y perderlo por no saber dónde ponerlo sería el peor desenlace.
+     */
+    private String buildVersionPath(com.officeplatform.entity.FileVersionEntity version,
+                                    Map<Long, String> pathByFileId,
+                                    Set<String> usedPaths) {
+        String filePath = version.getFileId() == null ? null : pathByFileId.get(version.getFileId());
+        String objectName = version.getObjectName();
+        String extension = "";
+        int dot = objectName.lastIndexOf('.');
+        int slash = objectName.lastIndexOf('/');
+        if (dot > slash) {
+            extension = objectName.substring(dot);
+        }
+        String leaf = "v" + version.getVersionNumber() + extension;
+
+        String base = (filePath != null)
+                ? "versiones/" + filePath.substring(filePath.indexOf('/') + 1) + "/" + leaf
+                : "versiones/_sin_ubicacion/" + safeName(objectName);
+        return deduplicate(base, usedPaths);
     }
 
     /** Nombre del proyecto tal como se muestra, o un marcador estable si ya no existe. */

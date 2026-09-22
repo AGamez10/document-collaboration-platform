@@ -75,6 +75,7 @@ public class BackupRestoreService {
     private final ApiKeyRepository apiKeyRepository;
     private final KnownUserRepository knownUserRepository;
     private final SharePermissionRepository sharePermissionRepository;
+    private final com.officeplatform.repository.FileVersionRepository fileVersionRepository;
     private final StorageService storageService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
@@ -86,6 +87,7 @@ public class BackupRestoreService {
             ApiKeyRepository apiKeyRepository,
             KnownUserRepository knownUserRepository,
             SharePermissionRepository sharePermissionRepository,
+            com.officeplatform.repository.FileVersionRepository fileVersionRepository,
             StorageService storageService,
             ObjectMapper objectMapper,
             PlatformTransactionManager transactionManager,
@@ -95,6 +97,7 @@ public class BackupRestoreService {
         this.apiKeyRepository = apiKeyRepository;
         this.knownUserRepository = knownUserRepository;
         this.sharePermissionRepository = sharePermissionRepository;
+        this.fileVersionRepository = fileVersionRepository;
         this.storageService = storageService;
         this.objectMapper = objectMapper;
         // An explicit template rather than @Transactional on a method of this same bean: that
@@ -111,6 +114,7 @@ public class BackupRestoreService {
         int foldersCreated, foldersUpdated;
         int filesCreated, filesUpdated;
         int binariesRestored, binariesSkipped;
+        int versionsCreated, versionsUpdated;
         int sharePermissionsCreated, sharePermissionsUpdated;
         final List<String> warnings = new ArrayList<>();
     }
@@ -176,11 +180,14 @@ public class BackupRestoreService {
         Tally tally = new Tally();
         restoreMetadata(manifest, tally);
         restoreBinaries(manifest.path("filesMetadata"), zipEntries, tally);
+        restoreBinaries(manifest.path("fileVersionsMetadata"), zipEntries, tally);
 
-        log.info("Restauración de '{}' completada: {} archivos, {} carpetas, {} permisos, {} binarios ({} omitidos)",
+        log.info("Restauración de '{}' completada: {} archivos, {} carpetas, {} permisos, "
+                        + "{} versiones, {} binarios ({} omitidos)",
                 fileName, tally.filesCreated + tally.filesUpdated,
                 tally.foldersCreated + tally.foldersUpdated,
                 tally.sharePermissionsCreated + tally.sharePermissionsUpdated,
+                tally.versionsCreated + tally.versionsUpdated,
                 tally.binariesRestored, tally.binariesSkipped);
 
         return BackupRestoreResponse.builder()
@@ -198,6 +205,7 @@ public class BackupRestoreService {
                 .binariesSkipped(tally.binariesSkipped)
                 .sharePermissionsCreated(tally.sharePermissionsCreated)
                 .sharePermissionsUpdated(tally.sharePermissionsUpdated)
+                .fileVersionsRestored(tally.versionsCreated + tally.versionsUpdated)
                 .warnings(tally.warnings)
                 .build();
     }
@@ -217,7 +225,59 @@ public class BackupRestoreService {
             // documentos y perder sus restricciones dejaría a la vista lo que estaba limitado.
             restoreSharePermissions(manifest.path("sharePermissionsMetadata"),
                     apiKeyIds, folderIds, fileIds, tally);
+            // El historial, con los ids que los archivos acaban de recibir. Va dentro de la misma
+            // transacción: una versión que apunte a un archivo que no llegó a escribirse sería una
+            // fila imposible de abrir.
+            restoreFileVersions(manifest.path("fileVersionsMetadata"), fileIds, tally);
         });
+    }
+
+    /**
+     * Devuelve el historial de versiones a {@code file_versions}.
+     *
+     * <p>Es idempotente por el par (archivo, número de versión): restaurar dos veces el mismo
+     * paquete actualiza las filas en lugar de duplicar el historial. Una versión cuyo archivo no
+     * viajó en el paquete se descarta con una advertencia — escribirla dejaría una fila apuntando
+     * a un id que en esta base pertenece a otro documento, que es peor que no tenerla.
+     */
+    private void restoreFileVersions(JsonNode nodes, Map<Long, Long> fileIds, Tally tally) {
+        for (JsonNode node : arrayOf(nodes)) {
+            Long backupFileId = number(node, "fileId");
+            Long fileId = mapped(fileIds, backupFileId);
+            Integer versionNumber = node.hasNonNull("versionNumber")
+                    ? node.get("versionNumber").asInt() : null;
+            String objectName = text(node, "objectName");
+
+            if (fileId == null || versionNumber == null || objectName == null || objectName.isBlank()) {
+                if (objectName != null) {
+                    tally.warnings.add("Versión '" + objectName
+                            + "' descartada: su archivo no estaba en el respaldo.");
+                }
+                continue;
+            }
+
+            com.officeplatform.entity.FileVersionEntity entity = fileVersionRepository
+                    .findByFileIdAndVersionNumber(fileId, versionNumber).orElse(null);
+            boolean isNew = entity == null;
+            if (isNew) {
+                entity = new com.officeplatform.entity.FileVersionEntity();
+                entity.setFileId(fileId);
+                entity.setVersionNumber(versionNumber);
+                entity.setCreatedAt(dateTime(node, "createdAt", LocalDateTime.now()));
+            }
+            entity.setObjectName(objectName);
+            entity.setSize(number(node, "size"));
+            entity.setCreatedByUserId(text(node, "createdByUserId"));
+            entity.setCreatedByName(text(node, "createdByName"));
+            entity.setComment(text(node, "comment"));
+
+            fileVersionRepository.save(entity);
+            if (isNew) {
+                tally.versionsCreated++;
+            } else {
+                tally.versionsUpdated++;
+            }
+        }
     }
 
     /** @return map from the api key id recorded in the backup to the id in this database */

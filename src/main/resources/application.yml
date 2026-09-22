@@ -65,6 +65,11 @@ office-platform:
       secret: ${ONLYOFFICE_JWT_SECRET:changeme-onlyoffice-secret-key32}
   cors:
     allowed-origins: ${OFFICE_PLATFORM_CORS_ALLOWED_ORIGINS:*}
+  versions:
+    # Versiones que se conservan por archivo. Cada guardado del editor archiva una copia completa
+    # del estado previo, y esas copias no cuentan contra la cuota del proyecto: sin techo, el disco
+    # se llena sin que ningun numero de la consola lo anticipe. En 0 se conserva todo el historial.
+    max-per-file: ${OFFICE_PLATFORM_MAX_VERSIONS_PER_FILE:20}
   backup:
     directory: ${OFFICE_PLATFORM_BACKUP_PATH:backups}
     auto-enabled: ${OFFICE_PLATFORM_BACKUP_AUTO_ENABLED:true}

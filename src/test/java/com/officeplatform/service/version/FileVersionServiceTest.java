@@ -1,6 +1,7 @@
 package com.officeplatform.service.version;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -100,11 +101,24 @@ class FileVersionServiceTest {
         lenient().when(versionRepository.findAllByFileId(anyLong()))
                 .thenAnswer(i -> versions.stream()
                         .filter(v -> i.getArgument(0).equals(v.getFileId())).toList());
+        // Lo que necesita la poda: leer el historial ordenado y borrar las filas sobrantes.
+        lenient().when(versionRepository.findAllByFileIdOrderByVersionNumberDesc(anyLong()))
+                .thenAnswer(i -> versions.stream()
+                        .filter(v -> i.getArgument(0).equals(v.getFileId()))
+                        .sorted((x, y) -> y.getVersionNumber() - x.getVersionNumber())
+                        .toList());
+        lenient().doAnswer(i -> {
+            versions.removeAll(i.<java.util.List<FileVersionEntity>>getArgument(0));
+            return null;
+        }).when(versionRepository).deleteAll(any());
+
         lenient().when(fileRepository.findById(anyLong())).thenReturn(Optional.of(file));
         lenient().when(fileRepository.save(any(FileEntity.class))).thenAnswer(i -> i.getArgument(0));
 
+        // Tope alto: los casos de este archivo miden el archivado, no la poda, que tiene sus
+        // propias pruebas. Un tope bajo acá haría desaparecer versiones en mitad de otra prueba.
         service = new FileVersionServiceImpl(versionRepository, fileRepository,
-                storageService, activityLogRecorder);
+                storageService, activityLogRecorder, 100);
     }
 
     private String contentOf(String objectName) {
@@ -112,6 +126,76 @@ class FileVersionServiceTest {
     }
 
     // ── archivado ────────────────────────────────────────────────────────────
+
+    // ── poda del historial ───────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("the history stops growing at the configured ceiling")
+    void prunesTheOldestVersionsPastTheCeiling() {
+        // Cada guardado del editor archiva una copia completa del estado previo, y esas copias no
+        // cuentan contra la cuota del proyecto: sin techo, una planilla coeditada durante un mes
+        // llena el disco sin que ningun numero de la consola lo anticipe.
+        FileVersionServiceImpl conTope = new FileVersionServiceImpl(versionRepository, fileRepository,
+                storageService, activityLogRecorder, 3);
+
+        for (int i = 0; i < 5; i++) {
+            conTope.archiveCurrent(file, "111", "Ana", "guardado " + i);
+        }
+
+        // Quedan las tres mas recientes; la numeracion no se reutiliza, asi que son la 3, 4 y 5.
+        assertThat(versions).hasSize(3);
+        assertThat(versions.stream().map(FileVersionEntity::getVersionNumber))
+                .containsExactlyInAnyOrder(3, 4, 5);
+    }
+
+    @Test
+    @DisplayName("the pruned binaries leave the storage, not just the table")
+    void prunedVersionsAlsoLeaveStorage() {
+        // Borrar la fila y dejar el objeto seria peor que no podar: el disco no se libera y el
+        // historial ya no sabe que ese binario existe, asi que nadie lo va a borrar nunca.
+        FileVersionServiceImpl conTope = new FileVersionServiceImpl(versionRepository, fileRepository,
+                storageService, activityLogRecorder, 2);
+
+        for (int i = 0; i < 4; i++) {
+            conTope.archiveCurrent(file, "111", "Ana", "guardado " + i);
+        }
+
+        assertThat(objects).doesNotContainKey("versions/" + file.getUuid() + "/v1.xlsx");
+        assertThat(objects).doesNotContainKey("versions/" + file.getUuid() + "/v2.xlsx");
+        assertThat(objects).containsKey("versions/" + file.getUuid() + "/v4.xlsx");
+    }
+
+    @Test
+    @DisplayName("a ceiling of zero keeps the whole history, for whoever needs it")
+    void aZeroCeilingDisablesPruning() {
+        FileVersionServiceImpl sinTope = new FileVersionServiceImpl(versionRepository, fileRepository,
+                storageService, activityLogRecorder, 0);
+
+        for (int i = 0; i < 6; i++) {
+            sinTope.archiveCurrent(file, "111", "Ana", "guardado " + i);
+        }
+
+        assertThat(versions).hasSize(6);
+    }
+
+    @Test
+    @DisplayName("a binary that cannot be deleted does not cost the user their save")
+    void aFailedPruneNeverBreaksTheSave() {
+        // La poda corre dentro del guardado del editor: no poder liberar disco no puede costarle
+        // a nadie su trabajo.
+        FileVersionServiceImpl conTope = new FileVersionServiceImpl(versionRepository, fileRepository,
+                storageService, activityLogRecorder, 1);
+        org.mockito.Mockito.doThrow(new RuntimeException("MinIO caido"))
+                .when(storageService).delete(org.mockito.ArgumentMatchers.startsWith("versions/"));
+
+        assertThatCode(() -> {
+            conTope.archiveCurrent(file, "111", "Ana", "uno");
+            conTope.archiveCurrent(file, "111", "Ana", "dos");
+        }).doesNotThrowAnyException();
+
+        // La version nueva quedo archivada igual, que es lo unico irremplazable.
+        assertThat(versions.stream().map(FileVersionEntity::getVersionNumber)).contains(2);
+    }
 
     @Test
     @DisplayName("archiving copies the current content to a version of its own")

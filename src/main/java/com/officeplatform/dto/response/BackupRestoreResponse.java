@@ -42,5 +42,14 @@ public class BackupRestoreResponse {
     private int sharePermissionsCreated;
     private int sharePermissionsUpdated;
 
+    /**
+     * Versiones históricas devueltas a {@code file_versions}.
+     *
+     * <p>Antes el historial no viajaba en el paquete: una recuperación ante desastre devolvía los
+     * documentos sin una sola versión anterior, sin error y sin aviso. Este número existe para que
+     * quien restaura pueda ver que el historial volvió, en lugar de descubrir meses después que no.
+     */
+    private int fileVersionsRestored;
+
     private List<String> warnings;
 }

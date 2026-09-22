@@ -2,6 +2,7 @@ package com.officeplatform.service.backup;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
@@ -70,6 +71,7 @@ class BackupRestoreServiceTest {
     @Mock private ApiKeyRepository apiKeyRepository;
     @Mock private KnownUserRepository knownUserRepository;
     @Mock private SharePermissionRepository sharePermissionRepository;
+    @Mock private com.officeplatform.repository.FileVersionRepository fileVersionRepository;
     @Mock private StorageService storageService;
     @Mock private PlatformTransactionManager transactionManager;
 
@@ -83,6 +85,7 @@ class BackupRestoreServiceTest {
     private final Map<String, byte[]> stored = new LinkedHashMap<>();
     private final List<SharePermissionEntity> savedGrants = new ArrayList<>();
     private final List<KnownUserEntity> savedUsers = new ArrayList<>();
+    private final List<com.officeplatform.entity.FileVersionEntity> savedVersions = new ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -145,6 +148,23 @@ class BackupRestoreServiceTest {
             return u;
         });
 
+        // El historial: idempotente por (archivo, numero de version), igual que el servicio real.
+        AtomicLong versionSeq = new AtomicLong(4000);
+        lenient().when(fileVersionRepository.findByFileIdAndVersionNumber(anyLong(), anyInt()))
+                .thenAnswer(i -> savedVersions.stream()
+                        .filter(v -> i.getArgument(0).equals(v.getFileId()))
+                        .filter(v -> i.getArgument(1).equals(v.getVersionNumber()))
+                        .findFirst());
+        lenient().when(fileVersionRepository.save(any(com.officeplatform.entity.FileVersionEntity.class)))
+                .thenAnswer(i -> {
+                    com.officeplatform.entity.FileVersionEntity v = i.getArgument(0);
+                    if (v.getId() == null) {
+                        v.setId(versionSeq.incrementAndGet());
+                        savedVersions.add(v);
+                    }
+                    return v;
+                });
+
         AtomicLong grantSeq = new AtomicLong(3000);
         lenient().when(sharePermissionRepository.save(any(SharePermissionEntity.class))).thenAnswer(i -> {
             SharePermissionEntity g = i.getArgument(0);
@@ -163,8 +183,8 @@ class BackupRestoreServiceTest {
                         .toList());
 
         service = new BackupRestoreService(fileRepository, folderRepository, apiKeyRepository,
-                knownUserRepository, sharePermissionRepository, storageService, objectMapper,
-                transactionManager, BUCKET);
+                knownUserRepository, sharePermissionRepository, fileVersionRepository,
+                storageService, objectMapper, transactionManager, BUCKET);
     }
 
     // ── package builders ─────────────────────────────────────────────────────
@@ -238,7 +258,99 @@ class BackupRestoreServiceTest {
         return manifest;
     }
 
+    /** Nodo de versión tal como lo escribe el manifest v4. */
+    private Map<String, Object> versionNode(long fileId, int numero, String objectName, String zipPath) {
+        Map<String, Object> n = new HashMap<>();
+        n.put("id", fileId * 100 + numero);
+        n.put("fileId", fileId);
+        n.put("versionNumber", numero);
+        n.put("objectName", objectName);
+        n.put("size", 1024);
+        n.put("createdByName", "Ana");
+        n.put("createdByUserId", "111");
+        n.put("comment", "Estado previo a un guardado desde el editor");
+        if (zipPath != null) {
+            n.put("zipEntryPath", zipPath);
+        }
+        return n;
+    }
+
     // ── cases ────────────────────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("the version history comes back pointing at the id the file got here")
+    void restoresTheVersionHistory() throws Exception {
+        // Sin esto, una recuperación ante desastre devolvía los documentos sin una sola versión
+        // anterior, y el id del respaldo no sirve: acá el archivo recibe otro.
+        Map<String, Object> manifest = hierarchicalManifest();
+        manifest.put("layoutVersion", 4);
+        manifest.put("fileVersionsMetadata", List.of(
+                versionNode(31L, 1, "versions/uuid-archivo/v1.docx",
+                        "versiones/Proyecto X/Informes/Semana 36/informe.docx/v1.docx")));
+
+        BackupRestoreResponse result = service.restore(new ByteArrayInputStream(packageOf(manifest, Map.of(
+                "archivos/Proyecto X/Informes/Semana 36/informe.docx", "contenido",
+                "versiones/Proyecto X/Informes/Semana 36/informe.docx/v1.docx", "lo de ayer"))),
+                "paquete.zip");
+
+        assertThat(result.getFileVersionsRestored()).isEqualTo(1);
+        assertThat(savedVersions).hasSize(1);
+        assertThat(savedVersions.get(0).getFileId())
+                .isEqualTo(filesByUuid.get("uuid-archivo").getId());
+        assertThat(savedVersions.get(0).getVersionNumber()).isEqualTo(1);
+        // El binario del historial vuelve al almacenamiento con su propia clave.
+        assertThat(stored).containsKey("versions/uuid-archivo/v1.docx");
+        assertThat(new String(stored.get("versions/uuid-archivo/v1.docx"), StandardCharsets.UTF_8))
+                .isEqualTo("lo de ayer");
+    }
+
+    @Test
+    @DisplayName("a version whose file is not in the package is dropped, not misapplied")
+    void dropsAVersionWithoutItsFile() throws Exception {
+        // Escribirla dejaría una fila apuntando a un id que en esta base pertenece a otro
+        // documento: alguien abriría "su" historial y encontraría el de un tercero.
+        Map<String, Object> manifest = hierarchicalManifest();
+        manifest.put("layoutVersion", 4);
+        manifest.put("fileVersionsMetadata", List.of(
+                versionNode(999L, 1, "versions/uuid-ajeno/v1.docx", null)));
+
+        BackupRestoreResponse result = service.restore(new ByteArrayInputStream(packageOf(manifest, Map.of(
+                "archivos/Proyecto X/Informes/Semana 36/informe.docx", "contenido"))), "paquete.zip");
+
+        assertThat(savedVersions).isEmpty();
+        assertThat(result.getFileVersionsRestored()).isZero();
+        assertThat(result.getWarnings()).anyMatch(w -> w.contains("versions/uuid-ajeno/v1.docx"));
+    }
+
+    @Test
+    @DisplayName("restoring the same package twice does not duplicate the history")
+    void restoringTwiceKeepsOneVersionPerNumber() throws Exception {
+        Map<String, Object> manifest = hierarchicalManifest();
+        manifest.put("layoutVersion", 4);
+        manifest.put("fileVersionsMetadata", List.of(
+                versionNode(31L, 1, "versions/uuid-archivo/v1.docx", null)));
+        byte[] zip = packageOf(manifest, Map.of(
+                "archivos/Proyecto X/Informes/Semana 36/informe.docx", "contenido"));
+
+        service.restore(new ByteArrayInputStream(zip), "paquete.zip");
+        service.restore(new ByteArrayInputStream(zip), "paquete.zip");
+
+        assertThat(savedVersions).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("a package from before the history travelled still restores")
+    void restoresALegacyPackageWithoutVersions() throws Exception {
+        // Los respaldos ya generados no declaran fileVersionsMetadata: tienen que seguir
+        // restaurándose sin que la ausencia se lea como un error.
+        BackupRestoreResponse result = service.restore(
+                new ByteArrayInputStream(packageOf(hierarchicalManifest(), Map.of(
+                        "archivos/Proyecto X/Informes/Semana 36/informe.docx", "contenido"))),
+                "paquete.zip");
+
+        assertThat(result.getFileVersionsRestored()).isZero();
+        assertThat(result.getFilesCreated()).isEqualTo(1);
+    }
 
     @Test
     @DisplayName("nested folders come back with their hierarchy and the file inside its own folder")
