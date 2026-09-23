@@ -12,4 +12,7 @@ public interface StorageService {
 
     String presignedDownloadUrl(String objectName);
 
+    /** Nombres de todos los objetos del bucket configurado. */
+    java.util.List<String> listObjectNames();
+
 }

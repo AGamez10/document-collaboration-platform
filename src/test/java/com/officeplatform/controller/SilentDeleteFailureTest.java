@@ -53,6 +53,8 @@ class SilentDeleteFailureTest {
     @Mock private ShareService shareService;
     @Mock private FileVersionService fileVersionService;
     @Mock private NotificationService notificationService;
+    @Mock private com.officeplatform.service.zip.ZipInspectionService zipInspectionService;
+    @Mock private com.officeplatform.service.zip.ZipExtractionService zipExtractionService;
     @Mock private ApiKeyPrincipal principal;
 
     private FileController fileController;
@@ -61,7 +63,7 @@ class SilentDeleteFailureTest {
     @BeforeEach
     void setUp() {
         fileController = new FileController(fileService, folderService, shareService,
-                fileVersionService, notificationService);
+                fileVersionService, notificationService, zipInspectionService, zipExtractionService);
         folderController = new FolderController(folderService, shareService, notificationService);
 
         lenient().when(principal.getApiKeyId()).thenReturn(PROJECT);

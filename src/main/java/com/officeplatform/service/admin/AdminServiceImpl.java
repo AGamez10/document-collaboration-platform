@@ -88,6 +88,8 @@ public class AdminServiceImpl implements AdminService {
     private final BackupService backupService;
     private final com.officeplatform.service.search.FileIndexingService fileIndexingService;
     private final com.officeplatform.service.version.FileVersionService fileVersionService;
+    private final com.officeplatform.repository.AdminUserRepository adminUserRepository;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     private final int onlyOfficeMaxConnections;
     private final long storageLimit;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -106,6 +108,8 @@ public class AdminServiceImpl implements AdminService {
             BackupService backupService,
             com.officeplatform.service.search.FileIndexingService fileIndexingService,
             com.officeplatform.service.version.FileVersionService fileVersionService,
+            com.officeplatform.repository.AdminUserRepository adminUserRepository,
+            org.springframework.security.crypto.password.PasswordEncoder passwordEncoder,
             @Value("${office-platform.onlyoffice.max-connections}") int onlyOfficeMaxConnections,
             @Value("${office-platform.storage.max-total-size}") long storageLimit) {
         this.fileRepository = fileRepository;
@@ -121,6 +125,8 @@ public class AdminServiceImpl implements AdminService {
         this.backupService = backupService;
         this.fileIndexingService = fileIndexingService;
         this.fileVersionService = fileVersionService;
+        this.adminUserRepository = adminUserRepository;
+        this.passwordEncoder = passwordEncoder;
         this.onlyOfficeMaxConnections = onlyOfficeMaxConnections;
         this.storageLimit = storageLimit;
     }
@@ -337,6 +343,148 @@ public class AdminServiceImpl implements AdminService {
 
         return new PagedResponse<>(
                 content, page.getNumber(), page.getSize(), page.getTotalElements(), page.getTotalPages());
+    }
+
+    /**
+     * Tope de filas que se exportan de una vez.
+     *
+     * <p>Un registro de actividad de un año son cientos de miles de filas. Armarlas todas en
+     * memoria para un CSV tumbaría la aplicación por un botón; con el tope, el auditor acota el
+     * período, que es lo que una auditoría hace igual.
+     */
+    private static final int MAX_EXPORT_ROWS = 50_000;
+
+    @Override
+    public List<ActivityLogResponse> getActivityLogForExport(
+            LocalDate dateFrom, LocalDate dateTo, Long apiKeyId, String action, String userId,
+            Long folderId) {
+
+        Specification<ActivityLogEntity> spec =
+                buildActivityLogSpecification(dateFrom, dateTo, apiKeyId, action, userId, folderId);
+        Pageable tope = org.springframework.data.domain.PageRequest.of(0, MAX_EXPORT_ROWS,
+                org.springframework.data.domain.Sort.by(
+                        org.springframework.data.domain.Sort.Direction.DESC, "timestamp"));
+        Page<ActivityLogEntity> page = activityLogRepository.findAll(spec, tope);
+
+        if (page.getTotalElements() > MAX_EXPORT_ROWS) {
+            log.warn("Exportación de trazabilidad recortada: {} filas de {} coincidentes",
+                    MAX_EXPORT_ROWS, page.getTotalElements());
+        }
+
+        Map<Long, String> apiKeyNamesById = new HashMap<>();
+        apiKeyRepository.findAll().forEach(key -> apiKeyNamesById.put(key.getId(), key.getName()));
+        Map<Long, String> folderNamesById = new HashMap<>();
+        folderRepository.findAll().forEach(folder -> folderNamesById.put(folder.getId(), folder.getName()));
+
+        return page.getContent().stream()
+                .map(entity -> toActivityLogResponse(entity,
+                        apiKeyNamesById.get(entity.getApiKeyId()),
+                        folderNamesById.get(entity.getFolderId())))
+                .toList();
+    }
+
+    /**
+     * Cambia la contraseña del administrador.
+     *
+     * <p>Se exige la actual aunque la sesión ya esté autenticada: sin eso, una pestaña abierta en
+     * un equipo compartido alcanza para quedarse con el panel. Y la nueva tiene mínimos de
+     * fortaleza porque el usuario que llega acá viene, casi siempre, de la contraseña por defecto.
+     */
+    @Override
+    @Transactional
+    public void changeAdminPassword(String username, String currentPassword, String newPassword) {
+        com.officeplatform.entity.AdminUserEntity admin = adminUserRepository.findByUsername(username)
+                .orElseThrow(() -> new com.officeplatform.exception.InvalidCredentialsException(
+                        "La sesión no corresponde a un administrador válido."));
+
+        if (currentPassword == null || !passwordEncoder.matches(currentPassword, admin.getPasswordHash())) {
+            throw new com.officeplatform.exception.InvalidCredentialsException(
+                    "La contraseña actual no es correcta.");
+        }
+        assertPasswordIsStrong(newPassword, currentPassword);
+
+        admin.setPasswordHash(passwordEncoder.encode(newPassword));
+        adminUserRepository.save(admin);
+        // Sin la contraseña ni su longitud en la traza: el registro dice que cambió, no qué es.
+        log.info("Contraseña del administrador '{}' actualizada", username);
+        activityLogRecorder.record(null, "admin", username, ActivityAction.ADMIN_PASSWORD_CHANGE,
+                null, null, "Cambio de contraseña del administrador", null);
+    }
+
+    /** Ocho caracteres con letras y números: el mínimo que deja atrás a "admin123". */
+    private static void assertPasswordIsStrong(String nueva, String actual) {
+        if (nueva == null || nueva.trim().length() < 8) {
+            throw new IllegalArgumentException("La nueva contraseña debe tener al menos 8 caracteres.");
+        }
+        String limpia = nueva.trim();
+        boolean tieneLetra = limpia.chars().anyMatch(Character::isLetter);
+        boolean tieneDigito = limpia.chars().anyMatch(Character::isDigit);
+        if (!tieneLetra || !tieneDigito) {
+            throw new IllegalArgumentException("La nueva contraseña debe combinar letras y números.");
+        }
+        if (limpia.equals(actual)) {
+            throw new IllegalArgumentException("La nueva contraseña no puede ser igual a la actual.");
+        }
+        if ("admin123".equals(limpia)) {
+            throw new IllegalArgumentException(
+                    "Esa es la contraseña por defecto: elegí una distinta.");
+        }
+    }
+
+    /**
+     * Compara en una pasada la base contra el almacenamiento.
+     *
+     * <p>Las dos mitades pueden desincronizarse sin que nada falle a la vista, y cada desajuste
+     * duele de un lado distinto: una fila sin binario se lista normal y revienta al descargar
+     * —delante del usuario, en el peor momento—; un objeto sin fila ocupa disco que nadie va a
+     * liberar porque nadie sabe que está.
+     */
+    @Override
+    public com.officeplatform.dto.response.StorageParityResponse checkStorageParity() {
+        List<FileEntity> archivos = fileRepository.findAll();
+        java.util.Set<String> enLaBase = archivos.stream()
+                .map(FileEntity::getObjectName)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+
+        // Las versiones históricas viven bajo su propio prefijo y no tienen fila en 'files': se las
+        // excluye o todo el historial aparecería como huérfano.
+        java.util.Set<String> enElAlmacenamiento = storageService.listObjectNames().stream()
+                .filter(nombre -> !nombre.startsWith("versions/"))
+                .collect(java.util.stream.Collectors.toSet());
+
+        List<String> rotos = archivos.stream()
+                .filter(f -> f.getObjectName() != null && !enElAlmacenamiento.contains(f.getObjectName()))
+                .map(FileEntity::getOriginalFileName)
+                .limit(50)
+                .toList();
+        long totalRotos = archivos.stream()
+                .filter(f -> f.getObjectName() != null && !enElAlmacenamiento.contains(f.getObjectName()))
+                .count();
+
+        List<String> huerfanos = enElAlmacenamiento.stream()
+                .filter(nombre -> !enLaBase.contains(nombre))
+                .limit(50)
+                .toList();
+        long totalHuerfanos = enElAlmacenamiento.stream()
+                .filter(nombre -> !enLaBase.contains(nombre))
+                .count();
+
+        boolean sano = totalRotos == 0 && totalHuerfanos == 0;
+        String mensaje = sano
+                ? "Base y almacenamiento están a la par: cada archivo del gestor se puede descargar."
+                : totalRotos + " archivo(s) sin binario y " + totalHuerfanos + " objeto(s) sin fila.";
+
+        return com.officeplatform.dto.response.StorageParityResponse.builder()
+                .databaseFiles(archivos.size())
+                .minioObjects(enElAlmacenamiento.size())
+                .brokenLinks(totalRotos)
+                .orphanedObjects(totalHuerfanos)
+                .healthy(sano)
+                .brokenFileNames(rotos)
+                .orphanedObjectNames(huerfanos)
+                .message(mensaje)
+                .build();
     }
 
     private Specification<ActivityLogEntity> buildActivityLogSpecification(

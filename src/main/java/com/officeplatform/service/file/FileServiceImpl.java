@@ -349,6 +349,26 @@ public class FileServiceImpl implements FileService {
                 BLANK_PRESENTATION_EXTENSION, apiKeyId, folderId, userId, userName, scope);
     }
 
+    @Override
+    @Transactional
+    public FileEntity createFromBytes(byte[] content, String originalFileName, Long apiKeyId,
+                                      Long folderId, String userId, String userName, String scope) {
+        if (content == null || content.length == 0) {
+            throw new StorageException("El archivo '" + originalFileName + "' está vacío.");
+        }
+        assertQuotaAllows(apiKeyId, content.length);
+
+        String extension = FileUtils.extractExtension(originalFileName);
+        String mimeType = MimeUtils.contentTypeForFileName(originalFileName, null);
+
+        FileEntity saved = createBlank(content, originalFileName, mimeType, extension,
+                apiKeyId, folderId, userId, userName, scope);
+        // Se indexa igual que una subida: si no, lo que entra por acá no se encuentra por su texto
+        // y nadie entiende por qué unos archivos aparecen en la búsqueda y otros no.
+        fileIndexingService.indexAsync(saved.getId());
+        return saved;
+    }
+
     private FileEntity createBlank(
             byte[] content, String name, String mimeType, String extension,
             Long apiKeyId, Long folderId, String userId, String userName, String scope) {

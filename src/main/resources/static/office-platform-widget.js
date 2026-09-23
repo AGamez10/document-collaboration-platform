@@ -1176,6 +1176,15 @@
       line-height: 1.5;
     }
 
+    .op-zip-icon {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      vertical-align: -3px;
+      margin-right: 8px;
+    }
+    .op-zip-icon svg { width: 16px; height: 16px; }
+
     /* ── Visor de multimedia ───────────────────────────────────────────── */
     .op-media-modal { max-width: 900px; width: 92vw; }
     .op-audio-modal { max-width: 520px; width: 92vw; }
@@ -2188,6 +2197,169 @@
     });
   }
 
+  // ── Explorador de comprimidos ────────────────────────────────────────────
+  // En una carpeta compartida de Windows, entrar a un .zip es hacer doble clic. Sin esto, la
+  // unica forma de ver que hay adentro es bajarse el paquete entero para abrir un archivo.
+
+  async function listZipEntries(id) {
+    const res = await apiFetch('/api/files/' + id + '/zip-entries');
+    const j = await res.json();
+    return j.data || [];
+  }
+
+  async function downloadZipEntry(id, entryPath) {
+    const res = await apiFetch('/api/files/' + id + '/zip-entries/download?entryPath='
+      + encodeURIComponent(entryPath));
+    const blob = await res.blob();
+    triggerBlobDownload(blob, entryPath.split('/').pop());
+  }
+
+  async function extractZipInto(id, folderId, scope) {
+    const query = ['scope=' + encodeURIComponent(scope || getCurrentScope())];
+    if (folderId) query.push('targetFolderId=' + encodeURIComponent(folderId));
+    const res = await apiFetch('/api/files/' + id + '/zip-extract?' + query.join('&'),
+      { method: 'POST' });
+    const j = await res.json();
+    return j.data;
+  }
+
+  /**
+   * Muestra el contenido del comprimido y deja bajar un archivo suelto o volcarlo entero.
+   *
+   * <p>El arbol se dibuja con la sangria que ya trae cada entrada: el backend calcula la
+   * profundidad al recorrer el ZIP y el widget no tiene que reconstruirla.
+   */
+  function showZipExplorer(file) {
+    const shell = buildModalShell('Explorador de archivo comprimido');
+    shell.box.classList.add('op-modal-wide');
+
+    const intro = document.createElement('p');
+    intro.className = 'op-mh-intro';
+    intro.textContent = file.originalFileName;
+    shell.body.appendChild(intro);
+
+    const loading = document.createElement('div');
+    loading.className = 'op-mh-intro';
+    loading.textContent = 'Leyendo el comprimido…';
+    shell.body.appendChild(loading);
+
+    const cerrar = document.createElement('button');
+    cerrar.type = 'button';
+    cerrar.className = 'op-btn-secondary';
+    cerrar.textContent = 'Cerrar';
+    cerrar.onclick = closeModal;
+    shell.ft.appendChild(cerrar);
+
+    listZipEntries(file.id).then(function (entradas) {
+      loading.remove();
+
+      const archivos = entradas.filter(function (e) { return !e.directory; });
+      if (!archivos.length) {
+        const vacio = document.createElement('p');
+        vacio.className = 'op-mh-intro';
+        vacio.textContent = 'El comprimido no tiene archivos que se puedan listar.';
+        shell.body.appendChild(vacio);
+        return;
+      }
+
+      const resumen = document.createElement('p');
+      resumen.className = 'op-mh-intro';
+      const total = archivos.reduce(function (acc, e) { return acc + (e.size || 0); }, 0);
+      resumen.textContent = archivos.length + ' archivo(s) · ' + formatBytes(total) + ' sin comprimir';
+      shell.body.appendChild(resumen);
+
+      const table = document.createElement('table');
+      table.className = 'op-mh-table';
+      table.innerHTML = '<thead><tr><th>Archivo</th><th>Tamaño</th><th>Modificado</th><th></th></tr></thead>';
+      const tbody = document.createElement('tbody');
+
+      entradas.forEach(function (e) {
+        const tr = document.createElement('tr');
+
+        const nombre = document.createElement('td');
+        const icono = document.createElement('span');
+        icono.className = 'op-zip-icon';
+        icono.innerHTML = e.directory
+          ? FOLDER_ICON_SVG
+          : fileIconSvg(getFileKind({ originalFileName: e.name, mimeType: '' }));
+        const etiqueta = document.createElement('span');
+        etiqueta.textContent = e.name;
+        // La sangria refleja el nivel dentro del comprimido: sin ella, una estructura de tres
+        // niveles se lee como una lista plana y nadie sabe que cuelga de que.
+        nombre.style.paddingLeft = (10 + Math.max(e.depth || 0, 0) * 16) + 'px';
+        nombre.appendChild(icono);
+        nombre.appendChild(etiqueta);
+        tr.appendChild(nombre);
+
+        const tam = document.createElement('td');
+        tam.textContent = e.directory ? '—' : formatBytes(e.size || 0);
+        tr.appendChild(tam);
+
+        const fecha = document.createElement('td');
+        fecha.textContent = e.modifiedAt ? formatDate(e.modifiedAt) : '—';
+        tr.appendChild(fecha);
+
+        const acciones = document.createElement('td');
+        if (!e.directory) {
+          const grupo = document.createElement('div');
+          grupo.className = 'op-mh-actions';
+          const bajar = document.createElement('button');
+          bajar.type = 'button';
+          bajar.className = 'op-btn-secondary';
+          bajar.textContent = 'Descargar';
+          bajar.onclick = function () {
+            downloadZipEntry(file.id, e.path).catch(function (err) {
+              toast('No se pudo descargar: ' + err.message, 'error');
+            });
+          };
+          grupo.appendChild(bajar);
+          acciones.appendChild(grupo);
+        }
+        tr.appendChild(acciones);
+
+        tbody.appendChild(tr);
+      });
+
+      table.appendChild(tbody);
+      shell.body.appendChild(table);
+
+      const extraer = document.createElement('button');
+      extraer.type = 'button';
+      extraer.className = 'op-btn-primary';
+      extraer.textContent = '📦 Descomprimir en esta carpeta';
+      extraer.onclick = function () {
+        confirmarExtraccion(file, archivos.length, extraer);
+      };
+      shell.ft.appendChild(extraer);
+    }).catch(function (err) {
+      loading.textContent = 'No se pudo leer el comprimido: ' + err.message;
+    });
+  }
+
+  function confirmarExtraccion(file, cuantos, boton) {
+    const destino = state.currentFolderId ? 'la carpeta actual' : 'la raíz de este espacio';
+    showModal({
+      title: 'Descomprimir en el gestor',
+      message: 'Se van a crear en ' + destino + ' hasta ' + cuantos + ' archivo(s) con las '
+        + 'carpetas que traiga el comprimido. El .zip original no se toca.',
+      confirmLabel: 'Descomprimir',
+      onConfirm: function () {
+        boton.disabled = true;
+        extractZipInto(file.id, state.currentFolderId, getCurrentScope()).then(function (reporte) {
+          const omitidos = reporte && reporte.filesSkipped ? reporte.filesSkipped : 0;
+          toast('Importados ' + reporte.filesImported + ' archivo(s) en ' + reporte.foldersCreated
+            + ' carpeta(s)' + (omitidos ? '; ' + omitidos + ' omitido(s)' : '') + '.',
+            omitidos ? 'info' : 'success');
+          closeModal();
+          return loadFiles();
+        }).catch(function (err) {
+          boton.disabled = false;
+          toast('No se pudo descomprimir: ' + err.message, 'error');
+        });
+      },
+    });
+  }
+
   async function downloadFileBlob(id) {
     const res = await apiFetch('/api/files/' + id + '/download');
     return res.blob();
@@ -2269,6 +2441,12 @@
     const kind = getFileKind({ originalFileName: fileName, mimeType: mimeType });
     if (kind === 'image' || kind === 'video' || kind === 'audio') {
       openMediaViewer(id, fileName, kind);
+      return;
+    }
+    // Un .zip se explora, no se descarga a ciegas: es lo que la gente espera despues de una
+    // decada de hacer doble clic en el Explorador de Windows.
+    if (extensionOf(fileName || '') === 'zip') {
+      showZipExplorer({ id: id, originalFileName: fileName });
       return;
     }
     if (kind === 'archive' || kind === 'other') {
@@ -4560,6 +4738,11 @@
       menuItem('Renombrar', ICONS.rename, false, function () { handleRename(file); }),
       menuItem('Mover', ICONS.move, false, function () { showMovePicker(file); }),
     ];
+    if (extensionOf(file.originalFileName || '') === 'zip') {
+      items.splice(1, 0, menuItem('Explorar ZIP', ICONS.folder, false, function () {
+        showZipExplorer(file);
+      }));
+    }
     // En Compartidos el destino tiene que ser explícito. "Hacer una copia" a secas copiaba dentro
     // del mismo espacio compartido, y la copia quedaba tan imposible de llevarse a Mis Archivos
     // como el original: la salida que el mensaje de error ofrecía no llevaba a ninguna parte.

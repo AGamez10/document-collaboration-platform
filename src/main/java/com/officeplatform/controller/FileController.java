@@ -49,9 +49,16 @@ public class FileController {
     private final FileVersionService fileVersionService;
     private final com.officeplatform.service.notification.NotificationService notificationService;
 
+    private final com.officeplatform.service.zip.ZipInspectionService zipInspectionService;
+    private final com.officeplatform.service.zip.ZipExtractionService zipExtractionService;
+
     public FileController(FileService fileService, FolderService folderService, ShareService shareService,
                           FileVersionService fileVersionService,
-                          com.officeplatform.service.notification.NotificationService notificationService) {
+                          com.officeplatform.service.notification.NotificationService notificationService,
+                          com.officeplatform.service.zip.ZipInspectionService zipInspectionService,
+                          com.officeplatform.service.zip.ZipExtractionService zipExtractionService) {
+        this.zipInspectionService = zipInspectionService;
+        this.zipExtractionService = zipExtractionService;
         this.fileService = fileService;
         this.folderService = folderService;
         this.shareService = shareService;
@@ -375,6 +382,120 @@ public class FileController {
      * <p>Alcanza con permiso de lectura sobre el original —copiar no lo modifica—, pero si la
      * copia va a una carpeta, sobre esa carpeta sí se exige edición: escribir ahí es escribir.
      */
+    // ── Explorador de comprimidos ────────────────────────────────────────────
+    // En una carpeta compartida de Windows, entrar a un .zip es hacer doble clic. Con el archivo
+    // en un almacenamiento de objetos, sin esto la unica forma de ver que hay adentro es bajarse
+    // los doscientos megabytes enteros para abrir uno solo.
+
+    @GetMapping("/{id}/zip-entries")
+    public ResponseEntity<ApiResponse<List<com.officeplatform.service.zip.ZipEntryInfo>>> zipEntries(
+            @PathVariable Long id,
+            @RequestParam(required = false) String userId,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        // Mirar adentro es leer: alcanza con el acceso que permite descargarlo.
+        FileEntity fileEntity = fileService.getFile(id, principal.getApiKeyId(),
+                principal.resolveUserId(userId));
+        assertIsZip(fileEntity);
+
+        List<com.officeplatform.service.zip.ZipEntryInfo> entradas;
+        try (java.io.InputStream contenido = fileService.downloadFile(
+                id, principal.getApiKeyId(), principal.resolveUserId(userId), null)) {
+            entradas = zipInspectionService.listEntries(contenido);
+        } catch (java.io.IOException e) {
+            throw new com.officeplatform.exception.StorageException(
+                    "No se pudo leer el comprimido: " + e.getMessage(), e);
+        }
+
+        return ResponseEntity.ok(ApiResponse.<List<com.officeplatform.service.zip.ZipEntryInfo>>builder()
+                .success(true)
+                .message("Contenido del comprimido listado correctamente")
+                .data(entradas)
+                .build());
+    }
+
+    @GetMapping("/{id}/zip-entries/download")
+    public ResponseEntity<InputStreamResource> downloadZipEntry(
+            @PathVariable Long id,
+            @RequestParam("entryPath") String entryPath,
+            @RequestParam(required = false) String userId,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        FileEntity fileEntity = fileService.getFile(id, principal.getApiKeyId(),
+                principal.resolveUserId(userId));
+        assertIsZip(fileEntity);
+
+        byte[] contenido;
+        try (java.io.InputStream zip = fileService.downloadFile(
+                id, principal.getApiKeyId(), principal.resolveUserId(userId), null)) {
+            contenido = zipInspectionService.extractEntry(zip, entryPath);
+        } catch (java.io.IOException e) {
+            throw new com.officeplatform.exception.StorageException(
+                    "No se pudo leer el comprimido: " + e.getMessage(), e);
+        }
+
+        String nombre = com.officeplatform.service.zip.ZipInspectionService.fileNameOf(entryPath);
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + nombre + "\"")
+                .contentType(MediaType.parseMediaType(MimeUtils.contentTypeForFileName(nombre, null)))
+                .contentLength(contenido.length)
+                .body(new InputStreamResource(new java.io.ByteArrayInputStream(contenido)));
+    }
+
+    @PostMapping("/{id}/zip-extract")
+    public ResponseEntity<ApiResponse<com.officeplatform.service.zip.ZipExtractionService.ExtractionReport>>
+            extractZip(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long targetFolderId,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) String userName,
+            @RequestParam(required = false) String scope,
+            @AuthenticationPrincipal ApiKeyPrincipal principal) {
+
+        FileEntity fileEntity = fileService.getFile(id, principal.getApiKeyId(),
+                principal.resolveUserId(userId));
+        assertIsZip(fileEntity);
+
+        // Extraer ESCRIBE: sobre la carpeta destino se exige edicion, no lectura.
+        if (targetFolderId != null) {
+            com.officeplatform.entity.SharePermissionEntity.PermissionLevel destino =
+                    shareService.getEffectivePermission(
+                            com.officeplatform.entity.SharePermissionEntity.ResourceType.FOLDER,
+                            targetFolderId, principal);
+            if (destino != com.officeplatform.entity.SharePermissionEntity.PermissionLevel.EDIT) {
+                throw new com.officeplatform.exception.ShareAccessDeniedException(
+                        "Se requieren permisos de edición en la carpeta de destino.");
+            }
+        }
+
+        com.officeplatform.service.zip.ZipExtractionService.ExtractionReport reporte;
+        try (java.io.InputStream zip = fileService.downloadFile(
+                id, principal.getApiKeyId(), principal.resolveUserId(userId), null)) {
+            reporte = zipExtractionService.extractInto(zip, targetFolderId, principal,
+                    principal.resolveUserId(userId), principal.resolveUserName(userName), scope);
+        } catch (java.io.IOException e) {
+            throw new com.officeplatform.exception.StorageException(
+                    "No se pudo leer el comprimido: " + e.getMessage(), e);
+        }
+
+        return ResponseEntity.ok(ApiResponse
+                .<com.officeplatform.service.zip.ZipExtractionService.ExtractionReport>builder()
+                .success(true)
+                .message("Se importaron " + reporte.getFilesImported() + " archivo(s) del comprimido")
+                .data(reporte)
+                .build());
+    }
+
+    /** Un .docx tambien es un ZIP por dentro; explorarlo como comprimido no tiene sentido. */
+    private void assertIsZip(FileEntity fileEntity) {
+        String nombre = fileEntity.getOriginalFileName() == null ? "" : fileEntity.getOriginalFileName();
+        String extension = nombre.toLowerCase(java.util.Locale.ROOT);
+        if (!extension.endsWith(".zip")) {
+            throw new com.officeplatform.exception.InvalidOperationException(
+                    "'" + nombre + "' no es un archivo comprimido .zip.");
+        }
+    }
+
     @PostMapping("/{id}/copy")
     public ResponseEntity<ApiResponse<FileResponse>> copy(
             @PathVariable Long id,

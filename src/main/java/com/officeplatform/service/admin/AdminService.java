@@ -45,6 +45,21 @@ public interface AdminService {
     /** Asigna o quita el tope de un proyecto. Gigabytes null deja el proyecto sin limite. */
     com.officeplatform.dto.response.ProjectStorageResponse updateQuota(Long apiKeyId, Double quotaGb);
 
+    /**
+     * Toda la trazabilidad que coincide con los filtros, sin paginar, para exportarla.
+     *
+     * <p>Una auditoría ISO no navega páginas: pide el período completo en un archivo.
+     */
+    List<ActivityLogResponse> getActivityLogForExport(
+            java.time.LocalDate dateFrom, java.time.LocalDate dateTo, Long apiKeyId,
+            String action, String userId, Long folderId);
+
+    /** Cambia la contraseña del administrador que está operando. */
+    void changeAdminPassword(String username, String currentPassword, String newPassword);
+
+    /** Compara la base contra el almacenamiento y dice si están a la par. */
+    com.officeplatform.dto.response.StorageParityResponse checkStorageParity();
+
     PagedResponse<ActivityLogResponse> getActivityLog(
             Pageable pageable, LocalDate dateFrom, LocalDate dateTo, Long apiKeyId, String action, String userId,
             Long folderId);

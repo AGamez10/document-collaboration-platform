@@ -72,6 +72,8 @@ class TrashRetentionTest {
     @Mock private KnownUserRepository knownUserRepository;
     @Mock private BackupService backupService;
     @Mock private FileVersionService fileVersionService;
+    @Mock private com.officeplatform.repository.AdminUserRepository adminUserRepository;
+    @Mock private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     private FileServiceImpl userService;
     private AdminServiceImpl adminService;
@@ -115,7 +117,8 @@ class TrashRetentionTest {
         adminService = new AdminServiceImpl(fileRepository, apiKeyRepository, activityLogRepository,
                 folderRepository, storageService, editorSessionRepository, onlyOfficeService,
                 knownUserService, knownUserRepository, activityLogRecorder, backupService,
-                fileIndexingService, fileVersionService, 20, 10_000_000_000L);
+                fileIndexingService, fileVersionService, adminUserRepository, passwordEncoder,
+                20, 10_000_000_000L);
     }
 
     // ── el usuario oculta ────────────────────────────────────────────────────

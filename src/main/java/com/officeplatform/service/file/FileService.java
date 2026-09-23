@@ -30,6 +30,17 @@ public interface FileService {
     FileEntity uploadFile(
             MultipartFile file, UploadFileRequest request, Long apiKeyId, Long folderId, String userId, String userName, String scope);
 
+    /**
+     * Crea un archivo a partir de bytes que ya están en memoria.
+     *
+     * <p>Es la puerta para todo lo que entra sin pasar por una subida del navegador: lo que sale de
+     * un comprimido, lo que llega de una carpeta de red. Aplica la misma cuota, el mismo registro
+     * de actividad y el mismo indexado que una subida normal, porque un archivo que entra por otra
+     * puerta no debería tener otras reglas.
+     */
+    FileEntity createFromBytes(byte[] content, String originalFileName, Long apiKeyId, Long folderId,
+                               String userId, String userName, String scope);
+
     FileEntity createBlankFile(Long apiKeyId, Long folderId, String userId, String userName, String scope);
 
     FileEntity createBlankSpreadsheet(Long apiKeyId, Long folderId, String userId, String userName, String scope);

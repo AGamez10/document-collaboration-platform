@@ -55,8 +55,14 @@ public class AdminController {
     private static final int DEFAULT_ACTIVITY_LOG_PAGE_SIZE = 20;
 
     private final AdminService adminService;
+    private final com.officeplatform.service.admin.ActivityLogCsvExporter activityLogCsvExporter;
+    private final com.officeplatform.service.admin.BulkImportService bulkImportService;
 
-    public AdminController(AdminService adminService) {
+    public AdminController(AdminService adminService,
+                           com.officeplatform.service.admin.ActivityLogCsvExporter activityLogCsvExporter,
+                           com.officeplatform.service.admin.BulkImportService bulkImportService) {
+        this.activityLogCsvExporter = activityLogCsvExporter;
+        this.bulkImportService = bulkImportService;
         this.adminService = adminService;
     }
 
@@ -191,6 +197,83 @@ public class AdminController {
                 .build();
 
         return ResponseEntity.ok(response);
+    }
+
+    /**
+     * La trazabilidad completa del período, en un archivo que una auditoría pueda abrir.
+     *
+     * <p>Punto y coma y BOM no son un capricho: Excel en español interpreta la coma como separador
+     * decimal y sin BOM muestra cada tilde rota. Un CSV correcto en teoría que se abre mal en la
+     * máquina del auditor no sirve de nada.
+     */
+    @GetMapping("/activity-log/export")
+    public ResponseEntity<byte[]> exportActivityLog(
+            @RequestParam(required = false) LocalDate dateFrom,
+            @RequestParam(required = false) LocalDate dateTo,
+            @RequestParam(required = false) Long apiKeyId,
+            @RequestParam(required = false) String action,
+            @RequestParam(required = false) String userId,
+            @RequestParam(required = false) Long folderId) {
+
+        byte[] csv = activityLogCsvExporter.toCsv(
+                adminService.getActivityLogForExport(dateFrom, dateTo, apiKeyId, action, userId, folderId));
+
+        String nombre = "trazabilidad_" + java.time.LocalDate.now() + ".csv";
+        return ResponseEntity.ok()
+                .header(org.springframework.http.HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + nombre + "\"")
+                .contentType(org.springframework.http.MediaType.parseMediaType("text/csv; charset=UTF-8"))
+                .contentLength(csv.length)
+                .body(csv);
+    }
+
+    /** Cambia la contraseña del administrador que está operando el panel. */
+    @PutMapping("/profile/password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(
+            @Valid @RequestBody com.officeplatform.dto.request.ChangeAdminPasswordRequest request,
+            java.security.Principal principal) {
+
+        adminService.changeAdminPassword(principal.getName(),
+                request.getCurrentPassword(), request.getNewPassword());
+
+        return ResponseEntity.ok(ApiResponse.<Void>builder()
+                .success(true)
+                .message("Contraseña actualizada. Usá la nueva en el próximo ingreso.")
+                .build());
+    }
+
+    /**
+     * Migra una carpeta del servidor al gestor, con su jerarquia.
+     *
+     * <p>Es el puente para apagar el DataServer. Corre sincronico a proposito: quien migra necesita
+     * ver el reporte y saber que omitio, no un "empezo" que despues hay que ir a buscar al log.
+     */
+    @PostMapping("/import/filesystem")
+    public ResponseEntity<ApiResponse<com.officeplatform.dto.response.BulkImportResponse>> importFromFilesystem(
+            @Valid @RequestBody com.officeplatform.dto.request.BulkImportRequest request) {
+
+        com.officeplatform.dto.response.BulkImportResponse data =
+                bulkImportService.importFromFilesystem(request);
+
+        return ResponseEntity.ok(ApiResponse
+                .<com.officeplatform.dto.response.BulkImportResponse>builder()
+                .success(true)
+                .message("Importados " + data.getFilesImported() + " archivo(s) en "
+                        + data.getFoldersCreated() + " carpeta(s); " + data.getFilesSkipped() + " omitido(s).")
+                .data(data)
+                .build());
+    }
+
+    /** Compara la base contra el almacenamiento y dice si hay archivos rotos o espacio muerto. */
+    @GetMapping("/health/storage-parity")
+    public ResponseEntity<ApiResponse<com.officeplatform.dto.response.StorageParityResponse>> storageParity() {
+        com.officeplatform.dto.response.StorageParityResponse data = adminService.checkStorageParity();
+        return ResponseEntity.ok(ApiResponse
+                .<com.officeplatform.dto.response.StorageParityResponse>builder()
+                .success(true)
+                .message(data.getMessage())
+                .data(data)
+                .build());
     }
 
     @GetMapping("/activity-log")

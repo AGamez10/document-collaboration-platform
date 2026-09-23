@@ -38,6 +38,11 @@ public class StorageServiceImpl implements StorageService {
     }
 
     @Override
+    public java.util.List<String> listObjectNames() {
+        return storageProvider.listObjectNames(bucket);
+    }
+
+    @Override
     public String presignedDownloadUrl(String objectName) {
         return storageProvider.presignedDownloadUrl(bucket, objectName, PRESIGNED_URL_EXPIRY_SECONDS);
     }

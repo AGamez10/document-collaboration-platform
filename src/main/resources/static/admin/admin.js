@@ -289,6 +289,149 @@
 
   els.logout.addEventListener('click', doLogout);
 
+  // ── Exportación de trazabilidad para auditoría ISO ────────────────────────
+  // El auditor no navega páginas: pide el período completo en un archivo. La descarga va por
+  // fetch y no por un <a href> porque el endpoint exige la cabecera de autenticación, que un
+  // enlace directo no manda.
+  const exportBtn = document.getElementById('op-export-activity-btn');
+  if (exportBtn) {
+    exportBtn.addEventListener('click', async function () {
+      const params = new URLSearchParams();
+      const desde = document.getElementById('op-filter-date-from');
+      const hasta = document.getElementById('op-filter-date-to');
+      const accion = document.getElementById('op-filter-action');
+      const usuario = document.getElementById('op-filter-user-id');
+      if (desde && desde.value) params.set('dateFrom', desde.value);
+      if (hasta && hasta.value) params.set('dateTo', hasta.value);
+      if (accion && accion.value) params.set('action', accion.value);
+      if (usuario && usuario.value.trim()) params.set('userId', usuario.value.trim());
+
+      exportBtn.disabled = true;
+      try {
+        const res = await api('/api/admin/activity-log/export?' + params.toString());
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'trazabilidad_' + new Date().toISOString().slice(0, 10) + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+        showToast('Trazabilidad exportada. Se abre en Excel con las columnas separadas.');
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        exportBtn.disabled = false;
+      }
+    });
+  }
+
+  // ── Cambio de contraseña del administrador ────────────────────────────────
+  const profileBtn = document.getElementById('op-profile-btn');
+  if (profileBtn) {
+    profileBtn.addEventListener('click', async function () {
+      const actual = window.prompt('Contraseña actual:');
+      if (!actual) return;
+      const nueva = window.prompt('Nueva contraseña (mínimo 8 caracteres, con letras y números):');
+      if (!nueva) return;
+      const repetida = window.prompt('Repetí la nueva contraseña:');
+      if (nueva !== repetida) {
+        showToast('Las dos contraseñas nuevas no coinciden.', true);
+        return;
+      }
+      try {
+        const res = await api('/api/admin/profile/password', {
+          method: 'PUT',
+          body: JSON.stringify({ currentPassword: actual, newPassword: nueva }),
+        });
+        showToast(res.message || 'Contraseña actualizada.');
+        // La sesión guarda la cabecera Basic con la contraseña vieja: sin volver a ingresar,
+        // la próxima petición saldría con una credencial que ya no existe.
+        setTimeout(doLogout, 1500);
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    });
+  }
+
+  // ── Paridad entre la base y el almacenamiento ─────────────────────────────
+  const parityBtn = document.getElementById('op-parity-btn');
+  if (parityBtn) {
+    parityBtn.addEventListener('click', async function () {
+      parityBtn.disabled = true;
+      try {
+        const res = await api('/api/admin/health/storage-parity');
+        const d = res.data || {};
+        const detalle = 'Base: ' + d.databaseFiles + ' archivo(s) · Storage: ' + d.minioObjects
+          + ' objeto(s)\nSin binario: ' + d.brokenLinks + '\nObjetos huérfanos: ' + d.orphanedObjects
+          + (d.brokenFileNames && d.brokenFileNames.length
+              ? '\n\nArchivos rotos:\n- ' + d.brokenFileNames.slice(0, 15).join('\n- ')
+              : '');
+        showToast(d.message, !d.healthy);
+        // El detalle va aparte del aviso: un toast no puede llevar quince nombres de archivo, y
+        // esos nombres son justamente lo que hay que ir a buscar.
+        if (!d.healthy) {
+          window.alert(d.message + '\n\n' + detalle);
+        }
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        parityBtn.disabled = false;
+      }
+    });
+  }
+
+  // ── Migración masiva desde una carpeta del servidor ───────────────────────
+  const importBtn = document.getElementById('op-import-btn');
+  if (importBtn) {
+    importBtn.addEventListener('click', async function () {
+      const ruta = window.prompt('Carpeta del servidor a importar (por ejemplo /import/dataserver):');
+      if (!ruta || !ruta.trim()) return;
+      const proyecto = window.prompt('Id del proyecto (API key) destino:');
+      if (!proyecto || !proyecto.trim()) return;
+      const cedula = window.prompt('Cédula que queda como autora de lo importado (opcional):') || '';
+
+      if (!window.confirm('Se va a recorrer "' + ruta.trim() + '" e importar todo lo que tenga, '
+          + 'reproduciendo sus carpetas. Sobre un volumen grande puede tardar varios minutos.')) {
+        return;
+      }
+
+      importBtn.disabled = true;
+      const textoOriginal = importBtn.textContent;
+      importBtn.textContent = '⏳ Importando…';
+      try {
+        const res = await api('/api/admin/import/filesystem', {
+          method: 'POST',
+          body: JSON.stringify({
+            sourceDirectoryPath: ruta.trim(),
+            targetApiKeyId: Number(proyecto.trim()),
+            targetFolderId: null,
+            defaultUserId: cedula.trim() || null,
+            scope: 'shared',
+          }),
+        });
+        const d = res.data || {};
+        showToast(res.message);
+        const resumen = 'Carpetas creadas: ' + d.foldersCreated
+          + '\nArchivos importados: ' + d.filesImported
+          + '\nOmitidos: ' + d.filesSkipped
+          + '\nTotal: ' + formatBytes(d.totalBytesImported || 0)
+          + '\nDuración: ' + Math.round((d.durationMs || 0) / 1000) + ' s'
+          + (d.warnings && d.warnings.length
+              ? '\n\nPrimeros avisos:\n- ' + d.warnings.slice(0, 15).join('\n- ')
+              : '');
+        window.alert(resumen);
+        loadView('files');
+      } catch (err) {
+        showToast(err.message, true);
+      } finally {
+        importBtn.disabled = false;
+        importBtn.textContent = textoOriginal;
+      }
+    });
+  }
+
   // ── Navigation & Views ────────────────────────────────────────────────
   const VIEW_CONFIG = {
     dashboard: { title: 'Dashboard General', subtitle: 'Monitoreo en tiempo real, almacenamiento y sesiones activas' },

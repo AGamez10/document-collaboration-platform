@@ -65,6 +65,21 @@ public class MinioServiceImpl implements MinioService {
     }
 
     @Override
+    public java.util.List<String> listObjectNames(String bucket) {
+        java.util.List<String> nombres = new java.util.ArrayList<>();
+        try {
+            Iterable<io.minio.Result<io.minio.messages.Item>> resultados = minioClient.listObjects(
+                    io.minio.ListObjectsArgs.builder().bucket(bucket).recursive(true).build());
+            for (io.minio.Result<io.minio.messages.Item> resultado : resultados) {
+                nombres.add(resultado.get().objectName());
+            }
+        } catch (Exception e) {
+            throw new StorageException("No se pudieron listar los objetos del bucket: " + e.getMessage(), e);
+        }
+        return nombres;
+    }
+
+    @Override
     public String presignedDownloadUrl(String bucket, String objectName, int expirySeconds) {
         try {
             return minioClient.getPresignedObjectUrl(

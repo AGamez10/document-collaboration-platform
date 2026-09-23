@@ -98,6 +98,10 @@
         </nav>
 
         <div class="op-sidebar__footer">
+          <button type="button" class="op-btn op-btn--ghost op-btn--sm" id="op-profile-btn"
+                  title="Cambiar la contraseña del administrador">
+            🔑 Cambiar contraseña
+          </button>
           <button type="button" id="op-theme-toggle" class="op-theme-toggle" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema claro/oscuro">
             <svg id="op-icon-theme" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           </button>
@@ -190,6 +194,10 @@
               </div>
               <div style="display: flex; align-items: center; gap: 0.75rem;">
                 <span class="op-badge op-badge--live">Auto-refresh 30s</span>
+                <button type="button" class="op-btn op-btn--sm op-btn--ghost" id="op-parity-btn"
+                        title="Compara las filas de la base contra los objetos del almacenamiento">
+                  🔍 Verificar paridad base vs storage
+                </button>
                 <button type="button" class="op-btn op-btn--sm op-btn--danger" id="op-close-all-sessions-btn">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
                   <span>Cerrar Todas las Sesiones</span>
@@ -256,6 +264,10 @@
           <div class="op-view__toolbar">
             <p class="op-view__desc">Consumo de cada proyecto y su tope asignado. Un proyecto sin cuota no tiene limite: asignarle uno protege el disco compartido de que una sola area lo consuma entero.</p>
             <div class="op-view__actions">
+              <button type="button" id="op-import-btn" class="op-btn op-btn--ghost"
+                      title="Trae una carpeta del servidor —el DataServer montado como volumen— con su jerarquía">
+                🚀 Migración / Carga masiva
+              </button>
               <button type="button" id="op-reindex-btn" class="op-btn op-btn--ghost">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                 <span>Indexar archivos historicos</span>
@@ -452,6 +464,8 @@
                 <option value="RENAME_FOLDER">RENAME_FOLDER (Renombrar carpeta)</option>
                 <option value="DELETE_FOLDER">DELETE_FOLDER (Borrar carpeta)</option>
                 <option value="MOVE_FILE">MOVE_FILE (Mover archivo)</option>
+                <option value="BULK_IMPORT">BULK_IMPORT (Migración masiva)</option>
+                <option value="ADMIN_PASSWORD_CHANGE">ADMIN_PASSWORD_CHANGE (Cambio de contraseña)</option>
               </select>
             </label>
             <label class="op-field op-field--inline">
@@ -461,6 +475,10 @@
             <div class="op-filters__btns">
               <button type="button" id="op-filter-apply" class="op-btn op-btn--primary">Filtrar</button>
               <button type="button" id="op-filter-clear" class="op-btn op-btn--ghost">Limpiar</button>
+              <button type="button" id="op-export-activity-btn" class="op-btn op-btn--ghost"
+                      title="Descarga la trazabilidad del período filtrado en CSV, listo para abrir en Excel">
+                📥 Exportar a CSV / Excel
+              </button>
             </div>
           </div>
 
