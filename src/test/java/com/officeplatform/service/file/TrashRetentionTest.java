@@ -73,6 +73,7 @@ class TrashRetentionTest {
     @Mock private BackupService backupService;
     @Mock private FileVersionService fileVersionService;
     @Mock private com.officeplatform.repository.AdminUserRepository adminUserRepository;
+    @Mock private com.officeplatform.repository.PortalUserRepository portalUserRepository;
     @Mock private org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     private FileServiceImpl userService;
@@ -117,7 +118,7 @@ class TrashRetentionTest {
         adminService = new AdminServiceImpl(fileRepository, apiKeyRepository, activityLogRepository,
                 folderRepository, storageService, editorSessionRepository, onlyOfficeService,
                 knownUserService, knownUserRepository, activityLogRecorder, backupService,
-                fileIndexingService, fileVersionService, adminUserRepository, passwordEncoder,
+                fileIndexingService, fileVersionService, adminUserRepository, portalUserRepository, passwordEncoder,
                 20, 10_000_000_000L);
     }
 

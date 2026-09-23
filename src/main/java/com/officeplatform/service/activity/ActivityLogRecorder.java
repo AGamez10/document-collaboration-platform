@@ -114,16 +114,76 @@ public class ActivityLogRecorder {
         return "Sistema";
     }
 
+    /**
+     * Cabeceras que los proxies usan para conservar la IP original, en orden de confianza.
+     *
+     * <p>{@code X-Forwarded-For} es el estándar de hecho; el resto lo escriben servidores y
+     * balanceadores viejos que siguen vivos en muchas redes corporativas. Se recorren en orden
+     * porque la primera que aparezca es la del proxy más cercano al cliente.
+     */
+    private static final String[] PROXY_HEADERS = {
+            "X-Forwarded-For", "X-Real-IP", "Proxy-Client-IP", "WL-Proxy-Client-IP",
+            "HTTP_CLIENT_IP", "HTTP_X_FORWARDED_FOR"
+    };
+
+    /**
+     * IP real de quien hizo la petición, atravesando los proxies del camino.
+     *
+     * <p>Con un proxy inverso adelante —lo habitual en una red corporativa— todas las peticiones
+     * llegan con la IP del proxy o del gateway de Docker. La bitácora terminaba anotando
+     * {@code 172.18.0.1} en cada fila: técnicamente cierto y completamente inútil para una
+     * auditoría, que necesita saber desde qué máquina se hizo algo.
+     *
+     * <p>El localhost en IPv6 se normaliza a {@code 127.0.0.1}: son la misma máquina, y ver dos
+     * formas distintas de lo mismo en el listado hace dudar de lo que se está mirando.
+     */
     private String resolveClientIp() {
         if (!(RequestContextHolder.getRequestAttributes() instanceof ServletRequestAttributes attributes)) {
             return null;
         }
         HttpServletRequest request = attributes.getRequest();
-        String forwardedFor = request.getHeader("X-Forwarded-For");
-        if (forwardedFor != null && !forwardedFor.isBlank()) {
-            return forwardedFor.split(",")[0].trim();
+
+        for (String cabecera : PROXY_HEADERS) {
+            String valor = request.getHeader(cabecera);
+            String candidata = firstUsableIp(valor);
+            if (candidata != null) {
+                return candidata;
+            }
         }
-        return request.getRemoteAddr();
+        return normalizeIp(request.getRemoteAddr());
+    }
+
+    /**
+     * Primera IP utilizable de una cabecera que puede traer una cadena de saltos.
+     *
+     * <p>{@code X-Forwarded-For} acumula cada proxy que la petición atravesó, separados por comas:
+     * la primera es la del cliente. Se descartan los valores vacíos y los "unknown" que algunos
+     * proxies escriben cuando no la conocen — tomarlos tal cual dejaría la palabra "unknown" como
+     * dirección en la bitácora.
+     */
+    private static String firstUsableIp(String headerValue) {
+        if (headerValue == null || headerValue.isBlank()) {
+            return null;
+        }
+        for (String parte : headerValue.split(",")) {
+            String ip = parte.trim();
+            if (!ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) {
+                return normalizeIp(ip);
+            }
+        }
+        return null;
+    }
+
+    /** El localhost de IPv6 y el de IPv4 son la misma máquina: se anota uno solo. */
+    static String normalizeIp(String ip) {
+        if (ip == null || ip.isBlank()) {
+            return null;
+        }
+        String limpia = ip.trim();
+        if ("0:0:0:0:0:0:0:1".equals(limpia) || "::1".equals(limpia)) {
+            return "127.0.0.1";
+        }
+        return limpia;
     }
 
 }

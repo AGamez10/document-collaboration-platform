@@ -98,6 +98,7 @@
         </nav>
 
         <div class="op-sidebar__footer">
+          <div class="op-sidebar__footer-row">
           <button type="button" class="op-btn op-btn--ghost op-btn--sm" id="op-profile-btn"
                   title="Cambiar la contraseña del administrador">
             🔑 Cambiar contraseña
@@ -105,6 +106,7 @@
           <button type="button" id="op-theme-toggle" class="op-theme-toggle" title="Cambiar tema claro/oscuro" aria-label="Cambiar tema claro/oscuro">
             <svg id="op-icon-theme" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           </button>
+          </div>
           <button type="button" id="op-logout" class="op-btn op-btn--ghost op-btn--sm">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
             <span>Cerrar Sesión</span>
@@ -113,8 +115,12 @@
       </aside>
 
       <!-- Main Content Area -->
+      <div class="op-sidebar-backdrop" id="op-sidebar-backdrop" hidden></div>
+
       <main class="op-main">
         <header class="op-topbar">
+          <button type="button" class="op-sidebar-toggle" id="op-sidebar-toggle"
+                  title="Mostrar u ocultar el menú" aria-label="Mostrar u ocultar el menú">☰</button>
           <div class="op-topbar__title-area">
             <h2 id="op-view-title">Dashboard General</h2>
             <span class="op-topbar__subtitle" id="op-view-subtitle">Monitoreo en tiempo real, métricas de almacenamiento y sesiones activas</span>
@@ -280,7 +286,7 @@
           </div>
 
           <div class="op-card">
-            <div class="op-table-wrap">
+            <div class="op-table-responsive">
               <table class="op-table">
                 <thead>
                   <tr>
@@ -403,6 +409,36 @@
                 <tbody id="op-users-tbody"></tbody>
               </table>
             </div>
+            <div class="op-panel" style="margin-top: 22px;">
+              <div class="op-view__header">
+                <div>
+                  <h3 style="margin:0;">Usuarios del Portal Web</h3>
+                  <p class="op-view__desc" style="margin:4px 0 0;">
+                    Entran por su cédula a <code>/portal</code> con su propia contraseña. El portal
+                    no tiene "olvidé mi contraseña": si alguien la pierde, se restablece desde acá
+                    a la provisional y el sistema le exige cambiarla al entrar.
+                  </p>
+                </div>
+              </div>
+              <div class="op-table-responsive">
+                <table class="op-table">
+                  <thead>
+                    <tr>
+                      <th>Cédula</th>
+                      <th>Nombre</th>
+                      <th>Estado de la clave</th>
+                      <th>Último ingreso</th>
+                      <th style="text-align:right;">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="op-portal-users-tbody"></tbody>
+                </table>
+              </div>
+              <p id="op-portal-users-empty" class="op-empty" hidden>
+                Todavía no ingresó nadie al portal web.
+              </p>
+            </div>
+
             <p id="op-users-empty" class="op-empty" hidden>No se encontraron usuarios registrados.</p>
           </div>
         </section>
@@ -680,6 +716,101 @@
       <div class="op-modal__actions">
         <button type="button" id="op-backup-modal-cancel" class="op-btn op-btn--ghost">Cancelar</button>
         <button type="button" id="op-backup-modal-save" class="op-btn op-btn--primary">Guardar Configuración</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Migración masiva desde una carpeta del servidor.
+       Antes esto era una cadena de window.prompt(): el que pedía el "Id del proyecto" aceptaba
+       cualquier texto, y escribir el NOMBRE del proyecto —que es lo que cualquiera haría—
+       producía NaN, viajaba como null y el backend respondía 400 sin decir por qué. Un selector
+       no puede equivocarse: las opciones son las que existen. -->
+  <div class="op-modal-overlay" id="op-modal-import" hidden>
+    <div class="op-modal op-modal--wide">
+      <button type="button" class="op-modal__close" id="op-import-close" aria-label="Cerrar">&times;</button>
+      <h3>🚀 Migración / Carga masiva</h3>
+      <p class="op-confirm__desc">
+        Trae una carpeta del servidor al gestor con su jerarquía de subcarpetas.
+        El contenido original no se toca.
+      </p>
+
+      <div class="op-dialog__form">
+        <label class="op-field">
+          <span>Proyecto destino</span>
+          <select id="op-import-project"></select>
+        </label>
+
+        <label class="op-field">
+          <span>Ruta en el servidor</span>
+          <input type="text" id="op-import-path" placeholder="/import/dataserver" />
+        </label>
+        <p class="op-dialog__hint">
+          Es la ruta <strong>dentro del contenedor</strong>, no la de tu PC. Un recurso de red
+          (<code>\\DataServer\Compartido</code>) hay que montarlo en el host y exponerlo como
+          volumen; después se importa desde su ruta montada, por ejemplo
+          <code>/import/dataserver</code>.
+        </p>
+
+        <label class="op-field">
+          <span>Cédula del autor (opcional)</span>
+          <input type="text" id="op-import-user" placeholder="admin" />
+        </label>
+        <p class="op-dialog__hint">
+          Queda como autora de todo lo importado. Si se deja vacía, se registra como
+          <code>admin</code>.
+        </p>
+
+        <label class="op-field">
+          <span>Ámbito</span>
+          <select id="op-import-scope">
+            <option value="shared">Compartido del proyecto — lo ve todo el equipo</option>
+            <option value="private">Mis Archivos — privado de esa cédula</option>
+          </select>
+        </label>
+
+        <label class="op-field">
+          <span>Carpeta destino (opcional)</span>
+          <input type="number" id="op-import-folder" placeholder="Id de carpeta; vacío = raíz" />
+        </label>
+      </div>
+
+      <div class="op-modal__actions">
+        <button type="button" id="op-import-cancel" class="op-btn op-btn--ghost">Cancelar</button>
+        <button type="button" id="op-import-run" class="op-btn op-btn--primary">Iniciar importación</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cambio de contraseña del administrador -->
+  <div class="op-modal-overlay" id="op-modal-password" hidden>
+    <div class="op-modal op-modal--wide">
+      <button type="button" class="op-modal__close" id="op-password-close" aria-label="Cerrar">&times;</button>
+      <h3>🔑 Cambiar contraseña</h3>
+      <p class="op-confirm__desc">
+        Se pide la contraseña actual aunque la sesión ya esté abierta: sin eso, una pestaña
+        olvidada en un equipo compartido alcanza para quedarse con el panel.
+      </p>
+
+      <div class="op-dialog__form">
+        <label class="op-field">
+          <span>Contraseña actual</span>
+          <input type="password" id="op-password-current" autocomplete="current-password" />
+        </label>
+        <label class="op-field">
+          <span>Nueva contraseña</span>
+          <input type="password" id="op-password-new" autocomplete="new-password" />
+        </label>
+        <p class="op-dialog__hint">Mínimo 8 caracteres, combinando letras y números.</p>
+        <label class="op-field">
+          <span>Confirmar nueva contraseña</span>
+          <input type="password" id="op-password-repeat" autocomplete="new-password" />
+        </label>
+        <p class="op-dialog__hint" id="op-password-error" style="color: var(--op-color-danger);" hidden></p>
+      </div>
+
+      <div class="op-modal__actions">
+        <button type="button" id="op-password-cancel" class="op-btn op-btn--ghost">Cancelar</button>
+        <button type="button" id="op-password-save" class="op-btn op-btn--primary">Cambiar contraseña</button>
       </div>
     </div>
   </div>

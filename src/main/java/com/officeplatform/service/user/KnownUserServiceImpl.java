@@ -102,6 +102,17 @@ public class KnownUserServiceImpl implements KnownUserService {
     }
 
     @Override
+    @Transactional
+    public void deleteUser(Long knownUserId) {
+        if (knownUserId == null || !knownUserRepository.existsById(knownUserId)) {
+            // Un borrado sobre algo que no existe se avisa en vez de responder éxito: en un panel
+            // de administración, un "listo" sobre una fila que sigue ahí es peor que un error.
+            throw new StorageException("El usuario no existe: " + knownUserId);
+        }
+        knownUserRepository.deleteById(knownUserId);
+    }
+
+    @Override
     public List<KnownUserEntity> listUsers(Long apiKeyId) {
         List<KnownUserEntity> all = knownUserRepository.findAllByOrderByLastSeenAtDesc();
         return deduplicateUsers(all, apiKeyId);

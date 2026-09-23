@@ -54,6 +54,20 @@ public interface AdminService {
             java.time.LocalDate dateFrom, java.time.LocalDate dateTo, Long apiKeyId,
             String action, String userId, Long folderId);
 
+    /** Usuarios del portal web, sin exponer nada derivado de su contraseña. */
+    List<com.officeplatform.dto.response.PortalUserResponse> listPortalUsers();
+
+    /**
+     * Devuelve a un usuario del portal a la contraseña provisional.
+     *
+     * <p>El portal no tiene "olvidé mi contraseña": sin esto, quien olvida la suya queda afuera
+     * para siempre y alguien termina editando la base a mano.
+     */
+    void resetPortalUserPassword(Long portalUserId);
+
+    /** Borra una inscripción de usuario del panel, dejando sus archivos intactos. */
+    void deleteKnownUser(Long knownUserId);
+
     /** Cambia la contraseña del administrador que está operando. */
     void changeAdminPassword(String username, String currentPassword, String newPassword);
 

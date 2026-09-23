@@ -976,3 +976,180 @@ body.not-authenticated .op-app {
 .op-bar--normal   { background: #16a34a; }
 .op-bar--warning  { background: #d97706; }
 .op-bar--critical { background: #dc2626; }
+
+
+/* ── Diálogos del panel ───────────────────────────────────────
+   Reemplazan a window.alert/confirm/prompt, que anuncian "localhost:8080 dice:"
+   antes de cualquier mensaje, no se pueden estilar y —lo que de verdad importa en
+   una consola de administración— algunos navegadores directamente las suprimen
+   cuando la pestaña no está en foco: la confirmación que separa un clic de una
+   purga definitiva no puede ser la pieza que el navegador decide no mostrar. */
+.op-confirm__icon { font-size: 30px; line-height: 1; }
+.op-confirm__icon--danger { color: var(--op-color-danger); }
+
+.op-dialog__input {
+  width: 100%;
+  margin: 4px 0 16px;
+  background: var(--admin-bg-input);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--op-radius-sm);
+  padding: 10px 13px;
+  font-size: 14px;
+  color: var(--admin-text);
+  font-family: inherit;
+}
+.op-dialog__input:focus {
+  outline: none;
+  border-color: var(--op-color-primary);
+  box-shadow: 0 0 0 3px var(--op-color-primary-light);
+}
+
+.op-dialog__detail {
+  text-align: left;
+  max-height: 260px;
+  overflow: auto;
+  margin: 4px 0 16px;
+  padding: 12px;
+  background: var(--admin-bg-input);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--op-radius-sm);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--admin-text);
+}
+
+/* Formulario dentro de un diálogo: el cambio de contraseña y la importación
+   necesitan varios campos, no una sola línea. */
+.op-dialog__form { text-align: left; margin-bottom: 16px; display: grid; gap: 12px; }
+.op-dialog__hint { font-size: 12px; color: var(--admin-text-muted); margin-top: -4px; line-height: 1.45; }
+.op-modal--wide { max-width: 560px; text-align: left; }
+.op-modal--wide .op-modal__actions { justify-content: flex-end; }
+
+/* ── Pie de la barra lateral ──────────────────────────────────
+   Tres botones en una sola fila dentro de 260px se solapaban y cortaban el texto
+   ("Cerrar Sesión xd" en la captura). Dos filas: la de arriba reparte el botón de
+   contraseña con el interruptor de tema, y abajo el cierre de sesión al ancho
+   completo, que es la acción que nadie quiere apretar por accidente. */
+.op-sidebar__footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--admin-border);
+}
+.op-sidebar__footer-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.op-sidebar__footer-row > #op-profile-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.op-sidebar__footer #op-theme-toggle {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.op-sidebar__footer #op-logout {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* ── Tablas con scroll propio ─────────────────────────────────
+   Sin esto, al angostar la ventana las columnas se aplastan hasta volverse
+   ilegibles en lugar de desplazarse. El mínimo obliga a la tabla a mantener un
+   ancho donde las celdas siguen queriendo decir algo. */
+.op-table-responsive {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.op-table-responsive > table { min-width: 650px; }
+.op-table-responsive::-webkit-scrollbar { height: 8px; }
+.op-table-responsive::-webkit-scrollbar-track { background: transparent; }
+.op-table-responsive::-webkit-scrollbar-thumb {
+  background: var(--admin-border);
+  border-radius: 4px;
+}
+.op-table-responsive::-webkit-scrollbar-thumb:hover { background: var(--admin-text-muted); }
+
+/* ── Adaptación a pantallas chicas ────────────────────────────
+   El panel se usa con la ventana dividida —la consola de un lado y el gestor del
+   otro— y ahí la barra lateral de 260px se come el contenido. */
+@media (max-width: 1024px) {
+  .op-main { padding: 20px 16px; }
+  .op-topbar { flex-wrap: wrap; gap: 10px; }
+  .op-view__actions { flex-wrap: wrap; gap: 10px; }
+  .op-filters { flex-wrap: wrap; }
+  .op-sidebar { width: 210px; }
+}
+
+@media (max-width: 768px) {
+  /* La barra lateral pasa a ser un cajón flotante: en este ancho, ocupar espacio
+     fijo significa no dejar lugar a la tabla que se vino a mirar. */
+  .op-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 60;
+    width: 260px;
+    transform: translateX(-100%);
+    transition: transform var(--op-transition);
+  }
+  body.op-sidebar-open .op-sidebar { transform: translateX(0); }
+  body.op-sidebar-open .op-sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .op-sidebar-toggle { display: inline-flex !important; }
+  .op-main { padding: 16px 12px; }
+  .op-view__header { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .op-stats, .op-cards { grid-template-columns: 1fr !important; }
+}
+
+/* El botón hamburguesa solo existe en pantallas donde la barra se esconde. */
+.op-sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin-right: 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--op-radius-sm);
+  background: transparent;
+  color: var(--admin-text);
+  font-size: 18px;
+  cursor: pointer;
+}
+.op-sidebar-toggle:hover { background: var(--admin-bg-input); }
+
+/* Indicador de trabajo en curso dentro de un botón. Una migración puede tardar minutos;
+   sin señal visible, la gente vuelve a apretar y dispara la importación dos veces. */
+.op-spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 7px;
+  vertical-align: -2px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: op-spin 0.65s linear infinite;
+}
+@keyframes op-spin { to { transform: rotate(360deg); } }

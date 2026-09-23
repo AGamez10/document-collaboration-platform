@@ -429,6 +429,51 @@ public class AdminController {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * Usuarios del portal web.
+     *
+     * <p>Son una identidad distinta de {@code known_users}: entran por su cédula al portal, con
+     * su propia contraseña. No tenían ninguna vista en el panel, así que un olvido de contraseña
+     * no tenía solución posible sin entrar a la base.
+     */
+    @GetMapping("/portal-users")
+    public ResponseEntity<ApiResponse<List<com.officeplatform.dto.response.PortalUserResponse>>> portalUsers() {
+        List<com.officeplatform.dto.response.PortalUserResponse> data = adminService.listPortalUsers();
+        return ResponseEntity.ok(ApiResponse
+                .<List<com.officeplatform.dto.response.PortalUserResponse>>builder()
+                .success(true)
+                .message("Usuarios del portal listados correctamente")
+                .data(data)
+                .build());
+    }
+
+    /** Devuelve a un usuario del portal a la contraseña provisional. */
+    @PostMapping("/portal-users/{portalUserId}/reset-password")
+    public ResponseEntity<ApiResponse<Void>> resetPortalPassword(@PathVariable Long portalUserId) {
+        adminService.resetPortalUserPassword(portalUserId);
+        return ResponseEntity.ok(ApiResponse.<Void>builder()
+                .success(true)
+                .message("Contraseña restablecida a la provisional. La persona deberá cambiarla "
+                        + "en su próximo ingreso al portal.")
+                .build());
+    }
+
+    /**
+     * Borra una inscripción de usuario del panel.
+     *
+     * <p>Sin esto, limpiar un usuario de prueba obligaba a entrar a la base a mano, que es
+     * exactamente la operación donde alguien borra la fila equivocada.
+     */
+    @DeleteMapping("/users/{knownUserId}")
+    public ResponseEntity<ApiResponse<Void>> deleteUser(@PathVariable Long knownUserId) {
+        adminService.deleteKnownUser(knownUserId);
+
+        return ResponseEntity.ok(ApiResponse.<Void>builder()
+                .success(true)
+                .message("Usuario eliminado del panel. Sus archivos y su autoría quedan intactos.")
+                .build());
+    }
+
     @PatchMapping("/users/{knownUserId}/role")
     public ResponseEntity<ApiResponse<KnownUserResponse>> updateUserRole(
             @PathVariable Long knownUserId,

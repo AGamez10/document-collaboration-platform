@@ -89,6 +89,7 @@ public class AdminServiceImpl implements AdminService {
     private final com.officeplatform.service.search.FileIndexingService fileIndexingService;
     private final com.officeplatform.service.version.FileVersionService fileVersionService;
     private final com.officeplatform.repository.AdminUserRepository adminUserRepository;
+    private final com.officeplatform.repository.PortalUserRepository portalUserRepository;
     private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     private final int onlyOfficeMaxConnections;
     private final long storageLimit;
@@ -109,6 +110,7 @@ public class AdminServiceImpl implements AdminService {
             com.officeplatform.service.search.FileIndexingService fileIndexingService,
             com.officeplatform.service.version.FileVersionService fileVersionService,
             com.officeplatform.repository.AdminUserRepository adminUserRepository,
+            com.officeplatform.repository.PortalUserRepository portalUserRepository,
             org.springframework.security.crypto.password.PasswordEncoder passwordEncoder,
             @Value("${office-platform.onlyoffice.max-connections}") int onlyOfficeMaxConnections,
             @Value("${office-platform.storage.max-total-size}") long storageLimit) {
@@ -126,6 +128,7 @@ public class AdminServiceImpl implements AdminService {
         this.fileIndexingService = fileIndexingService;
         this.fileVersionService = fileVersionService;
         this.adminUserRepository = adminUserRepository;
+        this.portalUserRepository = portalUserRepository;
         this.passwordEncoder = passwordEncoder;
         this.onlyOfficeMaxConnections = onlyOfficeMaxConnections;
         this.storageLimit = storageLimit;
@@ -210,6 +213,11 @@ public class AdminServiceImpl implements AdminService {
 
         ApiKeyEntity saved = apiKeyRepository.save(entity);
 
+        // Nunca la clave en la traza: la bitácora se exporta a CSV y se manda por correo a una
+        // auditoría. Queda el nombre y el id, que es lo que hace falta para saber qué se creó.
+        activityLogRecorder.record(saved.getId(), "admin", "Administrador", ActivityAction.ADMIN_API_KEY,
+                null, null, "Proyecto creado: " + saved.getName(), null);
+
         return new ApiKeyCreatedResponse(saved.getId(), saved.getName(), rawKey, saved.getActive(), saved.getCreatedAt());
     }
 
@@ -221,6 +229,10 @@ public class AdminServiceImpl implements AdminService {
 
         entity.setActive(active);
         ApiKeyEntity saved = apiKeyRepository.save(entity);
+
+        activityLogRecorder.record(saved.getId(), "admin", "Administrador", ActivityAction.ADMIN_API_KEY,
+                null, null, (active ? "Proyecto reactivado: " : "Proyecto suspendido: ") + saved.getName(), null);
+
         return toApiKeyResponse(saved);
     }
 
@@ -281,10 +293,12 @@ public class AdminServiceImpl implements AdminService {
         key.setStorageQuotaBytes(quotaGb == null ? null : Math.round(quotaGb * BYTES_PER_GB));
         apiKeyRepository.save(key);
 
-        log.info("Cuota del proyecto {} actualizada de {} a {}", key.getName(),
-                antes == null ? "sin limite" : com.officeplatform.util.FileUtils.formatBytes(antes),
-                key.getStorageQuotaBytes() == null ? "sin limite"
-                        : com.officeplatform.util.FileUtils.formatBytes(key.getStorageQuotaBytes()));
+        String desde = antes == null ? "sin limite" : com.officeplatform.util.FileUtils.formatBytes(antes);
+        String hasta = key.getStorageQuotaBytes() == null ? "sin limite"
+                : com.officeplatform.util.FileUtils.formatBytes(key.getStorageQuotaBytes());
+        log.info("Cuota del proyecto {} actualizada de {} a {}", key.getName(), desde, hasta);
+        activityLogRecorder.record(key.getId(), "admin", "Administrador", ActivityAction.ADMIN_QUOTA,
+                null, null, "Cuota de '" + key.getName() + "' de " + desde + " a " + hasta, null);
 
         return buildStorageResponse(key,
                 fileRepository.sumSizeByApiKeyIdAndDeletedAtIsNull(apiKeyId),
@@ -319,6 +333,12 @@ public class AdminServiceImpl implements AdminService {
     public void deleteApiKey(Long id) {
         ApiKeyEntity entity = apiKeyRepository.findById(id)
                 .orElseThrow(() -> new ApiKeyNotFoundException(id));
+
+        // Se registra ANTES de borrar: después no queda de dónde leer el nombre, y una bitácora
+        // que dice "se eliminó el proyecto 7" no le sirve a nadie dentro de seis meses.
+        activityLogRecorder.record(entity.getId(), "admin", "Administrador", ActivityAction.ADMIN_API_KEY,
+                null, null, "Proyecto eliminado: " + entity.getName(), null);
+
         apiKeyRepository.delete(entity);
     }
 
@@ -381,6 +401,69 @@ public class AdminServiceImpl implements AdminService {
                         apiKeyNamesById.get(entity.getApiKeyId()),
                         folderNamesById.get(entity.getFolderId())))
                 .toList();
+    }
+
+    /** La contraseña con la que entra alguien por primera vez, y a la que vuelve un reseteo. */
+    private static final String PORTAL_PROVISIONAL_PASSWORD = "2026";
+
+    @Override
+    public List<com.officeplatform.dto.response.PortalUserResponse> listPortalUsers() {
+        return portalUserRepository.findAll().stream()
+                .map(u -> com.officeplatform.dto.response.PortalUserResponse.builder()
+                        .id(u.getId())
+                        .cedula(u.getCedula())
+                        .displayName(u.getDisplayName())
+                        .mustChangePassword(u.isMustChangePassword())
+                        .createdAt(u.getCreatedAt())
+                        .lastLoginAt(u.getLastLoginAt())
+                        .build())
+                .toList();
+    }
+
+    /**
+     * Devuelve al usuario a la contraseña provisional y lo obliga a cambiarla.
+     *
+     * <p>Se restablece en vez de mostrar la que tenía —que no se puede, porque está hasheada— y
+     * se marca {@code mustChangePassword}: el portal lo va a frenar en el primer ingreso hasta
+     * que elija una propia, así la provisional no queda viviendo como contraseña real.
+     */
+    @Override
+    @Transactional
+    public void resetPortalUserPassword(Long portalUserId) {
+        com.officeplatform.entity.PortalUserEntity usuario = portalUserRepository.findById(portalUserId)
+                .orElseThrow(() -> new StorageException("El usuario del portal no existe: " + portalUserId));
+
+        usuario.setPasswordHash(passwordEncoder.encode(PORTAL_PROVISIONAL_PASSWORD));
+        usuario.setMustChangePassword(true);
+        portalUserRepository.save(usuario);
+
+        // Sin la contraseña en la traza: queda quién la restableció y a quién, que es lo que una
+        // auditoría pregunta.
+        log.info("Contraseña del usuario de portal '{}' restablecida a la provisional", usuario.getCedula());
+        activityLogRecorder.record(null, "admin", "Administrador", ActivityAction.ADMIN_PASSWORD_CHANGE,
+                null, null, "Contraseña del portal restablecida para la cédula " + usuario.getCedula(), null);
+    }
+
+    /**
+     * Borra la inscripción de un usuario, conservando lo que creó.
+     *
+     * <p>Se registra antes de borrar porque después no queda de dónde leer el nombre, y una
+     * bitácora que dice "se eliminó el usuario 47" no le sirve a nadie dentro de seis meses.
+     */
+    @Override
+    @Transactional
+    public void deleteKnownUser(Long knownUserId) {
+        com.officeplatform.entity.KnownUserEntity usuario = knownUserRepository.findById(knownUserId)
+                .orElseThrow(() -> new StorageException("El usuario no existe: " + knownUserId));
+
+        String descripcion = (usuario.getDisplayName() != null ? usuario.getDisplayName() : "sin nombre")
+                + " (" + usuario.getUserId() + ")";
+        activityLogRecorder.record(usuario.getApiKeyId(), "admin", "Administrador",
+                ActivityAction.ADMIN_USER_DELETE, null, null,
+                "Usuario eliminado del panel: " + descripcion, null);
+
+        knownUserService.deleteUser(knownUserId);
+        log.info("Usuario '{}' eliminado del registro de conocidos", descripcion);
     }
 
     /**
@@ -887,6 +970,11 @@ public class AdminServiceImpl implements AdminService {
             knownUserService.updateRole(primary.getId(), role);
         }
 
+        activityLogRecorder.record(primary.getApiKeyId(), "admin", "Administrador",
+                ActivityAction.ADMIN_USER_ROLE, null, null,
+                "Rol de " + (primary.getDisplayName() != null ? primary.getDisplayName() : "usuario")
+                        + " (" + primary.getUserId() + ") cambiado a " + role, null);
+
         KnownUserEntity updated = knownUserRepository.findById(knownUserId).orElse(primary);
         List<String> consumingApps = new ArrayList<>();
         if (targetUserId != null && !targetUserId.isBlank()) {
@@ -923,7 +1011,12 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public BackupInfoResponse createBackup(String type) {
-        return backupService.createBackup(type);
+        BackupInfoResponse info = backupService.createBackup(type);
+        activityLogRecorder.record(null, "admin", "Administrador", ActivityAction.ADMIN_BACKUP,
+                null, info.getFileName(),
+                "Copia de seguridad creada: " + info.getFilesCount() + " archivo(s), "
+                        + info.getFormattedSize(), null);
+        return info;
     }
 
     @Override
@@ -939,6 +1032,8 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public void deleteBackup(String fileName) {
         backupService.deleteBackup(fileName);
+        activityLogRecorder.record(null, "admin", "Administrador", ActivityAction.ADMIN_BACKUP,
+                null, fileName, "Copia de seguridad eliminada del disco", null);
     }
 
     @Override

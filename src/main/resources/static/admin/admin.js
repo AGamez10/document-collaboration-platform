@@ -163,6 +163,162 @@
 
   // ── Toast System ──────────────────────────────────────────────────────
   let toastTimer = null;
+  // ── Diálogos del panel ────────────────────────────────────────────────────
+  // Las ventanas nativas del navegador anuncian "localhost:8080 dice:" antes de cualquier
+  // mensaje, no se pueden estilar, bloquean el hilo y algunos navegadores directamente las
+  // suprimen cuando la pestaña no está en foco. En una consola de administración donde la
+  // confirmación es lo único que separa un clic de una purga definitiva, esa es la peor pieza
+  // posible: la que el navegador puede decidir no mostrar.
+  //
+  // Los tres helpers devuelven una promesa para que quien los llama escriba el flujo de arriba
+  // hacia abajo, sin callbacks anidados.
+
+  /** Arma la caja del diálogo con los estilos que el panel ya usa. */
+  function buildDialog(opts) {
+    const overlay = document.createElement('div');
+    overlay.className = 'op-modal-overlay';
+    const caja = document.createElement('div');
+    caja.className = 'op-modal op-modal--confirm';
+    overlay.appendChild(caja);
+
+    if (opts.icon !== false) {
+      const icono = document.createElement('div');
+      icono.className = 'op-confirm__icon' + (opts.danger ? ' op-confirm__icon--danger' : '');
+      icono.textContent = opts.danger ? '⚠️' : (opts.iconText || 'ℹ️');
+      caja.appendChild(icono);
+    }
+
+    const titulo = document.createElement('h3');
+    titulo.textContent = opts.title || '';
+    caja.appendChild(titulo);
+
+    if (opts.message) {
+      const desc = document.createElement('p');
+      desc.className = 'op-confirm__desc';
+      // textContent y no innerHTML: el mensaje suele llevar nombres de archivo que escribió un
+      // usuario, y esos nombres no pueden convertirse en marcado.
+      desc.textContent = opts.message;
+      caja.appendChild(desc);
+    }
+
+    const acciones = document.createElement('div');
+    acciones.className = 'op-modal__actions';
+    caja.appendChild(acciones);
+
+    return { overlay: overlay, caja: caja, acciones: acciones };
+  }
+
+  /** Cierra el diálogo y resuelve, dejando el teclado y el foco como estaban. */
+  function wireDialog(overlay, resolve, valorAlCancelar) {
+    const previo = document.activeElement;
+    function cerrar(valor) {
+      document.removeEventListener('keydown', onKey);
+      overlay.remove();
+      if (previo && typeof previo.focus === 'function') previo.focus();
+      resolve(valor);
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') cerrar(valorAlCancelar);
+    }
+    overlay.addEventListener('click', function (e) {
+      if (e.target === overlay) cerrar(valorAlCancelar);
+    });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(overlay);
+    return cerrar;
+  }
+
+  function showAdminConfirm(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      const d = buildDialog(opts);
+
+      const cancelar = document.createElement('button');
+      cancelar.type = 'button';
+      cancelar.className = 'op-btn op-btn--ghost';
+      cancelar.textContent = opts.cancelText || 'Cancelar';
+
+      const aceptar = document.createElement('button');
+      aceptar.type = 'button';
+      aceptar.className = 'op-btn ' + (opts.danger ? 'op-btn--danger' : 'op-btn--primary');
+      aceptar.textContent = opts.confirmText || 'Aceptar';
+
+      d.acciones.appendChild(cancelar);
+      d.acciones.appendChild(aceptar);
+
+      const cerrar = wireDialog(d.overlay, resolve, false);
+      cancelar.addEventListener('click', function () { cerrar(false); });
+      aceptar.addEventListener('click', function () { cerrar(true); });
+      // El foco arranca en Cancelar cuando la acción destruye algo: que Enter no sea el camino
+      // corto hacia un borrado definitivo.
+      (opts.danger ? cancelar : aceptar).focus();
+    });
+  }
+
+  function showAdminPrompt(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      const d = buildDialog(Object.assign({ iconText: '✏️' }, opts));
+
+      const campo = document.createElement('input');
+      campo.type = opts.inputType || 'text';
+      campo.className = 'op-input op-dialog__input';
+      campo.placeholder = opts.placeholder || '';
+      campo.value = opts.defaultValue || '';
+      d.caja.insertBefore(campo, d.acciones);
+
+      const cancelar = document.createElement('button');
+      cancelar.type = 'button';
+      cancelar.className = 'op-btn op-btn--ghost';
+      cancelar.textContent = opts.cancelText || 'Cancelar';
+
+      const aceptar = document.createElement('button');
+      aceptar.type = 'button';
+      aceptar.className = 'op-btn op-btn--primary';
+      aceptar.textContent = opts.confirmText || 'Aceptar';
+
+      d.acciones.appendChild(cancelar);
+      d.acciones.appendChild(aceptar);
+
+      const cerrar = wireDialog(d.overlay, resolve, null);
+      cancelar.addEventListener('click', function () { cerrar(null); });
+      aceptar.addEventListener('click', function () { cerrar(campo.value); });
+      campo.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') cerrar(campo.value);
+      });
+      campo.focus();
+      campo.select();
+    });
+  }
+
+  function showAdminAlert(opts) {
+    opts = opts || {};
+    return new Promise(function (resolve) {
+      const d = buildDialog(Object.assign({
+        iconText: opts.type === 'error' ? '⛔' : (opts.type === 'success' ? '✅' : 'ℹ️'),
+      }, opts));
+
+      // El detalle va en un bloque aparte y con scroll: un informe de importación trae veinte
+      // avisos y un párrafo suelto los vuelve ilegibles.
+      if (opts.detail) {
+        const pre = document.createElement('pre');
+        pre.className = 'op-dialog__detail';
+        pre.textContent = opts.detail;
+        d.caja.insertBefore(pre, d.acciones);
+      }
+
+      const aceptar = document.createElement('button');
+      aceptar.type = 'button';
+      aceptar.className = 'op-btn op-btn--primary';
+      aceptar.textContent = opts.confirmText || 'Entendido';
+      d.acciones.appendChild(aceptar);
+
+      const cerrar = wireDialog(d.overlay, resolve, undefined);
+      aceptar.addEventListener('click', function () { cerrar(undefined); });
+      aceptar.focus();
+    });
+  }
+
   function showToast(message, isError) {
     els.toast.textContent = message;
     els.toast.classList.toggle('is-error', !!isError);
@@ -289,6 +445,26 @@
 
   els.logout.addEventListener('click', doLogout);
 
+  // La barra lateral pasa a cajón por debajo de 768px: ahí, ocupar 260px fijos significa no
+  // dejarle lugar a la tabla que uno vino a mirar.
+  const sidebarToggle = document.getElementById('op-sidebar-toggle');
+  const sidebarBackdrop = document.getElementById('op-sidebar-backdrop');
+  if (sidebarToggle && sidebarBackdrop) {
+    function cerrarSidebar() {
+      document.body.classList.remove('op-sidebar-open');
+      sidebarBackdrop.hidden = true;
+    }
+    sidebarToggle.addEventListener('click', function () {
+      const abierto = document.body.classList.toggle('op-sidebar-open');
+      sidebarBackdrop.hidden = !abierto;
+    });
+    sidebarBackdrop.addEventListener('click', cerrarSidebar);
+    // Al elegir una vista el cajón se cierra solo: dejarlo abierto tapa justo lo que se pidió.
+    document.querySelectorAll('.op-nav__item').forEach(function (item) {
+      item.addEventListener('click', cerrarSidebar);
+    });
+  }
+
   // ── Exportación de trazabilidad para auditoría ISO ────────────────────────
   // El auditor no navega páginas: pide el período completo en un archivo. La descarga va por
   // fetch y no por un <a href> porque el endpoint exige la cabecera de autenticación, que un
@@ -329,28 +505,60 @@
 
   // ── Cambio de contraseña del administrador ────────────────────────────────
   const profileBtn = document.getElementById('op-profile-btn');
-  if (profileBtn) {
-    profileBtn.addEventListener('click', async function () {
-      const actual = window.prompt('Contraseña actual:');
-      if (!actual) return;
-      const nueva = window.prompt('Nueva contraseña (mínimo 8 caracteres, con letras y números):');
-      if (!nueva) return;
-      const repetida = window.prompt('Repetí la nueva contraseña:');
-      if (nueva !== repetida) {
-        showToast('Las dos contraseñas nuevas no coinciden.', true);
-        return;
+  const modalPassword = document.getElementById('op-modal-password');
+  if (profileBtn && modalPassword) {
+    const campoActual = document.getElementById('op-password-current');
+    const campoNueva = document.getElementById('op-password-new');
+    const campoRepetida = document.getElementById('op-password-repeat');
+    const errorPassword = document.getElementById('op-password-error');
+
+    function abrirPassword() {
+      campoActual.value = '';
+      campoNueva.value = '';
+      campoRepetida.value = '';
+      errorPassword.hidden = true;
+      modalPassword.hidden = false;
+      campoActual.focus();
+    }
+    function cerrarPassword() { modalPassword.hidden = true; }
+    function fallaPassword(texto) {
+      errorPassword.textContent = texto;
+      errorPassword.hidden = false;
+    }
+
+    profileBtn.addEventListener('click', abrirPassword);
+    document.getElementById('op-password-close').addEventListener('click', cerrarPassword);
+    document.getElementById('op-password-cancel').addEventListener('click', cerrarPassword);
+    modalPassword.addEventListener('click', function (e) {
+      if (e.target === modalPassword) cerrarPassword();
+    });
+
+    document.getElementById('op-password-save').addEventListener('click', async function () {
+      errorPassword.hidden = true;
+      const actual = campoActual.value;
+      const nueva = campoNueva.value;
+
+      // Se valida acá lo mismo que valida el backend, para que el error aparezca antes de
+      // mandar la contraseña por la red y no después.
+      if (!actual) return fallaPassword('Escribí tu contraseña actual.');
+      if (nueva.trim().length < 8) return fallaPassword('La nueva debe tener al menos 8 caracteres.');
+      if (!/[a-zA-Z]/.test(nueva) || !/[0-9]/.test(nueva)) {
+        return fallaPassword('La nueva debe combinar letras y números.');
       }
+      if (nueva !== campoRepetida.value) return fallaPassword('Las dos contraseñas nuevas no coinciden.');
+
       try {
         const res = await api('/api/admin/profile/password', {
           method: 'PUT',
           body: JSON.stringify({ currentPassword: actual, newPassword: nueva }),
         });
+        cerrarPassword();
         showToast(res.message || 'Contraseña actualizada.');
-        // La sesión guarda la cabecera Basic con la contraseña vieja: sin volver a ingresar,
-        // la próxima petición saldría con una credencial que ya no existe.
+        // La sesión guarda la cabecera Basic con la contraseña vieja: sin volver a ingresar, la
+        // próxima petición saldría con una credencial que ya no existe.
         setTimeout(doLogout, 1500);
       } catch (err) {
-        showToast(err.message, true);
+        fallaPassword(err.message);
       }
     });
   }
@@ -372,7 +580,12 @@
         // El detalle va aparte del aviso: un toast no puede llevar quince nombres de archivo, y
         // esos nombres son justamente lo que hay que ir a buscar.
         if (!d.healthy) {
-          window.alert(d.message + '\n\n' + detalle);
+          await showAdminAlert({
+            title: 'Paridad base vs almacenamiento',
+            message: d.message,
+            detail: detalle,
+            type: 'error',
+          });
         }
       } catch (err) {
         showToast(err.message, true);
@@ -384,50 +597,110 @@
 
   // ── Migración masiva desde una carpeta del servidor ───────────────────────
   const importBtn = document.getElementById('op-import-btn');
-  if (importBtn) {
-    importBtn.addEventListener('click', async function () {
-      const ruta = window.prompt('Carpeta del servidor a importar (por ejemplo /import/dataserver):');
-      if (!ruta || !ruta.trim()) return;
-      const proyecto = window.prompt('Id del proyecto (API key) destino:');
-      if (!proyecto || !proyecto.trim()) return;
-      const cedula = window.prompt('Cédula que queda como autora de lo importado (opcional):') || '';
+  const modalImport = document.getElementById('op-modal-import');
+  if (importBtn && modalImport) {
+    const selProyecto = document.getElementById('op-import-project');
+    const campoRuta = document.getElementById('op-import-path');
+    const campoCedula = document.getElementById('op-import-user');
+    const selAmbito = document.getElementById('op-import-scope');
+    const campoCarpeta = document.getElementById('op-import-folder');
+    const botonCorrer = document.getElementById('op-import-run');
 
-      if (!window.confirm('Se va a recorrer "' + ruta.trim() + '" e importar todo lo que tenga, '
-          + 'reproduciendo sus carpetas. Sobre un volumen grande puede tardar varios minutos.')) {
-        return;
-      }
+    function cerrarImport() { modalImport.hidden = true; }
 
-      importBtn.disabled = true;
-      const textoOriginal = importBtn.textContent;
-      importBtn.textContent = '⏳ Importando…';
+    /**
+     * Llena el selector con los proyectos que existen de verdad.
+     *
+     * <p>Este selector es la corrección de fondo: antes se pedía el "Id del proyecto" por teclado,
+     * y escribir el nombre —que es lo que cualquiera haría— producía NaN, viajaba como null y el
+     * backend respondía 400 sin explicar nada. Con opciones, el valor no puede estar mal.
+     */
+    async function cargarProyectos() {
+      selProyecto.innerHTML = '<option value="">Cargando…</option>';
       try {
+        const body = await api('/api/admin/api-keys');
+        const claves = (body.data || []).filter(function (k) { return k.active !== false; });
+        if (!claves.length) {
+          selProyecto.innerHTML = '<option value="">No hay proyectos activos</option>';
+          return;
+        }
+        selProyecto.innerHTML = claves.map(function (k) {
+          const pista = (k.maskedKey || k.apiKey || '').slice(0, 12);
+          return '<option value="' + k.id + '">' + escapeHtml(k.name)
+            + (pista ? ' — ' + escapeHtml(pista) + '…' : '') + '</option>';
+        }).join('');
+      } catch (err) {
+        selProyecto.innerHTML = '<option value="">No se pudieron cargar</option>';
+        showToast('No se pudieron cargar los proyectos: ' + err.message, true);
+      }
+    }
+
+    importBtn.addEventListener('click', function () {
+      campoRuta.value = campoRuta.value || '/import/dataserver';
+      modalImport.hidden = false;
+      cargarProyectos();
+      campoRuta.focus();
+    });
+    document.getElementById('op-import-close').addEventListener('click', cerrarImport);
+    document.getElementById('op-import-cancel').addEventListener('click', cerrarImport);
+    modalImport.addEventListener('click', function (e) {
+      if (e.target === modalImport) cerrarImport();
+    });
+
+    botonCorrer.addEventListener('click', async function () {
+      const proyecto = selProyecto.value;
+      const ruta = (campoRuta.value || '').trim();
+      if (!proyecto) { showToast('Elegí el proyecto destino.', true); return; }
+      if (!ruta) { showToast('Indicá la ruta del servidor a importar.', true); return; }
+
+      const confirmado = await showAdminConfirm({
+        title: 'Confirmar migración',
+        message: 'Se va a recorrer "' + ruta + '" e importar todo lo que tenga, reproduciendo sus '
+          + 'carpetas. Sobre un volumen grande puede tardar varios minutos y la ventana tiene que '
+          + 'quedar abierta.',
+        confirmText: 'Importar ahora',
+      });
+      if (!confirmado) return;
+
+      botonCorrer.disabled = true;
+      const textoOriginal = botonCorrer.textContent;
+      botonCorrer.innerHTML = '<span class="op-spinner"></span> Importando…';
+      try {
+        const carpeta = (campoCarpeta.value || '').trim();
         const res = await api('/api/admin/import/filesystem', {
           method: 'POST',
           body: JSON.stringify({
-            sourceDirectoryPath: ruta.trim(),
-            targetApiKeyId: Number(proyecto.trim()),
-            targetFolderId: null,
-            defaultUserId: cedula.trim() || null,
-            scope: 'shared',
+            sourceDirectoryPath: ruta,
+            targetApiKeyId: Number(proyecto),
+            targetFolderId: carpeta ? Number(carpeta) : null,
+            defaultUserId: (campoCedula.value || '').trim() || 'admin',
+            scope: selAmbito.value,
           }),
         });
         const d = res.data || {};
+        cerrarImport();
         showToast(res.message);
-        const resumen = 'Carpetas creadas: ' + d.foldersCreated
-          + '\nArchivos importados: ' + d.filesImported
-          + '\nOmitidos: ' + d.filesSkipped
-          + '\nTotal: ' + formatBytes(d.totalBytesImported || 0)
-          + '\nDuración: ' + Math.round((d.durationMs || 0) / 1000) + ' s'
-          + (d.warnings && d.warnings.length
-              ? '\n\nPrimeros avisos:\n- ' + d.warnings.slice(0, 15).join('\n- ')
-              : '');
-        window.alert(resumen);
+        await showAdminAlert({
+          title: 'Migración terminada',
+          message: res.message,
+          type: d.filesSkipped ? 'info' : 'success',
+          detail: 'Origen: ' + (d.sourceDirectoryPath || ruta)
+            + '\nCarpetas creadas: ' + d.foldersCreated
+            + '\nArchivos importados: ' + d.filesImported
+            + '\nOmitidos: ' + d.filesSkipped
+            + '\nPeso total: ' + formatBytes(d.totalBytesImported || 0)
+            + '\nDuración: ' + Math.round((d.durationMs || 0) / 1000) + ' s'
+            + (d.warnings && d.warnings.length
+                ? '\n\nAvisos (' + d.warnings.length + '):\n- '
+                  + d.warnings.slice(0, 20).join('\n- ')
+                : ''),
+        });
         loadView('files');
       } catch (err) {
         showToast(err.message, true);
       } finally {
-        importBtn.disabled = false;
-        importBtn.textContent = textoOriginal;
+        botonCorrer.disabled = false;
+        botonCorrer.textContent = textoOriginal;
       }
     });
   }
@@ -727,7 +1000,14 @@
 
     els.sessionsTbody.querySelectorAll('[data-session-id]').forEach(function (btn) {
       btn.addEventListener('click', async function () {
-        if (!window.confirm('¿Desconectar inmediatamente a este usuario del editor? Se cerrará la sesión de OnlyOffice.')) return;
+        const ok = await showAdminConfirm({
+          title: 'Desconectar del editor',
+          message: 'Se cerrará la sesión de OnlyOffice de esta persona. Si tiene cambios sin '
+            + 'guardar en ese momento, los pierde.',
+          confirmText: 'Desconectar',
+          danger: true,
+        });
+        if (!ok) return;
         try {
           await api('/api/admin/editor-sessions/' + btn.dataset.sessionId + '/close', { method: 'POST' });
           showToast('Usuario desconectado y sesión cerrada exitosamente.');
@@ -742,7 +1022,14 @@
 
   if (els.closeAllSessionsBtn) {
     els.closeAllSessionsBtn.addEventListener('click', async function () {
-      if (!window.confirm('¿Desconectar inmediatamente a TODOS los usuarios y forzar el cierre de todas las conexiones activas en OnlyOffice?')) return;
+      const ok = await showAdminConfirm({
+        title: 'Desconectar a todos',
+        message: 'Se cierran TODAS las sesiones activas del editor. Quien esté escribiendo en '
+          + 'este momento pierde lo que no haya guardado.',
+        confirmText: 'Desconectar a todos',
+        danger: true,
+      });
+      if (!ok) return;
       try {
         const res = await api('/api/admin/editor-sessions/close-all', { method: 'POST' });
         showToast(res.message || 'Todas las sesiones activas han sido cerradas.');
@@ -848,7 +1135,13 @@
         btn.addEventListener('click', async function () {
           const id = btn.dataset.restoreId;
           const name = btn.dataset.fileName;
-          if (!window.confirm('¿Restaurar el archivo "' + name + '" y devolverlo a su dueño? Volverá a estar activo en su carpeta original, o en la raíz si esa carpeta ya no existe.')) return;
+          const ok = await showAdminConfirm({
+            title: 'Restaurar archivo',
+            message: '"' + name + '" vuelve a estar activo para su dueño, en su carpeta original '
+              + 'o en la raíz si esa carpeta ya no existe.',
+            confirmText: 'Restaurar',
+          });
+          if (!ok) return;
           try {
             await api('/api/admin/files/' + id + '/restore', { method: 'POST' });
             showToast('Archivo "' + name + '" restaurado con éxito.');
@@ -864,7 +1157,15 @@
         btn.addEventListener('click', async function () {
           const id = btn.dataset.purgeId;
           const name = btn.dataset.fileName;
-          if (!window.confirm('¡Atención! Esto eliminará el archivo "' + name + '" de forma PERMANENTE e IRREVERSIBLE tanto de MinIO como de la base de datos. ¿Continuar?')) return;
+          // Es la única eliminación real del sistema: no hay papelera después de esto.
+          const ok = await showAdminConfirm({
+            title: 'Eliminación definitiva',
+            message: '"' + name + '" se borra de la base y del almacenamiento, junto con todo su '
+              + 'historial de versiones. No hay forma de recuperarlo después.',
+            confirmText: 'Eliminar definitivamente',
+            danger: true,
+          });
+          if (!ok) return;
           try {
             await api('/api/admin/files/' + id + '/purge', { method: 'DELETE' });
             showToast('Archivo purgado permanentemente.');
@@ -1021,16 +1322,18 @@
   }
 
   /** Pide el nuevo tope en gigabytes. Vacío quita el límite, que no es lo mismo que cero. */
-  function askQuota(apiKeyId, projectName) {
-    const lineas = [
-      'Cuota en GB para "' + projectName + '".',
-      '',
-      'Dejalo vacio para quitar el limite. Cero bloquearia el proyecto entero, asi que no se acepta.',
-    ];
-    const actual = window.prompt(lineas.join(String.fromCharCode(10)), '');
+  async function askQuota(apiKeyId, projectName) {
+    const actual = await showAdminPrompt({
+      title: 'Cuota de "' + projectName + '"',
+      message: 'Tope en gigabytes. Dejalo vacío para quitar el límite; cero bloquearía el '
+        + 'proyecto entero, así que no se acepta.',
+      placeholder: 'Por ejemplo 50',
+      inputType: 'number',
+      confirmText: 'Guardar cuota',
+    });
     if (actual === null) return;
 
-    const texto = actual.trim();
+    const texto = String(actual).trim();
     let gb = null;
     if (texto !== '') {
       gb = Number(texto.replace(',', '.'));
@@ -1131,7 +1434,14 @@
       els.backupsTbody.querySelectorAll('[data-delete-backup]').forEach(function (btn) {
         btn.addEventListener('click', async function () {
           const fn = btn.dataset.deleteBackup;
-          if (!window.confirm('¿Eliminar el archivo de copia de seguridad "' + fn + '" del disco?')) return;
+          const ok = await showAdminConfirm({
+            title: 'Eliminar copia de seguridad',
+            message: 'Se borra "' + fn + '" del disco. Si es el único respaldo de ese día, no hay '
+              + 'de dónde volver a sacarlo.',
+            confirmText: 'Eliminar',
+            danger: true,
+          });
+          if (!ok) return;
           try {
             await api('/api/admin/backups/' + encodeURIComponent(fn), { method: 'DELETE' });
             showToast('Backup eliminado del disco.');
@@ -1339,6 +1649,68 @@
   });
 
   // ── 4. USUARIOS & APLICACIONES ─────────────────────────────────────────
+  /**
+   * Usuarios del portal web, que son una identidad distinta de los "conocidos".
+   *
+   * <p>No tenían ninguna vista en el panel: un olvido de contraseña no tenía solución que no
+   * fuera editar la base a mano, que es justo la operación que un panel existe para evitar.
+   */
+  async function loadPortalUsers() {
+    const tbody = document.getElementById('op-portal-users-tbody');
+    const vacio = document.getElementById('op-portal-users-empty');
+    if (!tbody) return;
+
+    try {
+      const body = await api('/api/admin/portal-users');
+      const usuarios = body.data || [];
+      if (vacio) vacio.hidden = usuarios.length > 0;
+
+      tbody.innerHTML = usuarios.map(function (u) {
+        const estado = u.mustChangePassword
+          ? '<span class="op-badge op-badge--warning">Clave provisional</span>'
+          : '<span class="op-badge op-badge--success">Clave propia</span>';
+        return '<tr>' +
+          '<td><code>' + escapeHtml(u.cedula) + '</code></td>' +
+          '<td>' + escapeHtml(u.displayName || 'Sin nombre') + '</td>' +
+          '<td>' + estado + '</td>' +
+          '<td>' + (u.lastLoginAt ? formatRelativeTime(u.lastLoginAt) : 'Nunca') + '</td>' +
+          '<td style="text-align:right;">'
+            + '<button type="button" class="op-btn op-btn--sm op-btn--ghost" data-reset-portal="' + u.id + '"'
+            + ' data-portal-cedula="' + escapeHtml(u.cedula) + '">🔑 Restablecer clave</button>'
+            + '</td>' +
+          '</tr>';
+      }).join('');
+
+      tbody.querySelectorAll('[data-reset-portal]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          const ok = await showAdminConfirm({
+            title: 'Restablecer contraseña del portal',
+            message: 'La cédula ' + btn.dataset.portalCedula + ' vuelve a la contraseña '
+              + 'provisional y el portal le va a exigir cambiarla en su próximo ingreso. '
+              + 'Avisale antes: hasta que entre, su contraseña anterior deja de servir.',
+            confirmText: 'Restablecer',
+          });
+          if (!ok) return;
+          try {
+            const res = await api('/api/admin/portal-users/' + btn.dataset.resetPortal + '/reset-password',
+              { method: 'POST' });
+            showToast(res.message || 'Contraseña restablecida.');
+            loadPortalUsers();
+          } catch (err) {
+            showToast(err.message, true);
+          }
+        });
+      });
+    } catch (err) {
+      // Que falle esta tabla no puede llevarse puesta la de usuarios conocidos, que es la
+      // principal de la vista.
+      if (vacio) {
+        vacio.hidden = false;
+        vacio.textContent = 'No se pudieron cargar los usuarios del portal: ' + err.message;
+      }
+    }
+  }
+
   async function loadUsers() {
     els.usersEmpty.hidden = true;
     els.usersTbody.innerHTML = '<tr><td colspan="7" class="op-empty">Cargando directorio de usuarios...</td></tr>';
@@ -1391,9 +1763,40 @@
           '<td>' + roleBadge + '</td>' +
           '<td>' + formatDate(u.firstSeenAt) + '</td>' +
           '<td>' + formatRelativeTime(u.lastSeenAt) + '</td>' +
-          '<td style="text-align:right;"><button type="button" class="op-btn op-btn--sm op-btn--ghost" data-user-id="' + u.id + '" data-role="' + targetRole + '">' + roleBtnLabel + '</button></td>' +
+          '<td style="text-align:right;">'
+            + '<div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;">'
+            + '<button type="button" class="op-btn op-btn--sm op-btn--ghost" data-user-id="' + u.id + '" data-role="' + targetRole + '">' + roleBtnLabel + '</button>'
+            + '<button type="button" class="op-btn op-btn--sm op-btn--danger" data-delete-user="' + u.id + '"'
+            + ' data-user-name="' + name + '" data-user-cedula="' + escapeHtml(u.userId) + '">Eliminar</button>'
+            + '</div></td>' +
           '</tr>';
       }).join('');
+
+      // Limpiar un usuario de prueba obligaba a entrar a la base a mano, que es exactamente la
+      // operación donde alguien borra la fila equivocada.
+      loadPortalUsers();
+
+      els.usersTbody.querySelectorAll('[data-delete-user]').forEach(function (btn) {
+        btn.addEventListener('click', async function () {
+          const id = btn.dataset.deleteUser;
+          const ok = await showAdminConfirm({
+            title: 'Eliminar usuario del panel',
+            message: 'Se quita a ' + btn.dataset.userName + ' (' + btn.dataset.userCedula + ') de '
+              + 'los listados y de los selectores de compartir. Sus archivos y su autoría quedan '
+              + 'intactos: esto borra la inscripción, no lo que la persona creó.',
+            confirmText: 'Eliminar usuario',
+            danger: true,
+          });
+          if (!ok) return;
+          try {
+            const res = await api('/api/admin/users/' + id, { method: 'DELETE' });
+            showToast(res.message || 'Usuario eliminado del panel.');
+            loadUsers();
+          } catch (err) {
+            showToast(err.message, true);
+          }
+        });
+      });
 
       els.usersTbody.querySelectorAll('[data-user-id]').forEach(function (btn) {
         btn.addEventListener('click', async function () {

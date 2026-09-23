@@ -33,5 +33,23 @@ public enum ActivityAction {
     ADMIN_PASSWORD_CHANGE,
 
     /** Importacion masiva desde una carpeta del servidor. */
-    BULK_IMPORT
+    BULK_IMPORT,
+
+    // Acciones del panel de administracion. Entraron con la V11, que amplia el CHECK de
+    // activity_log: sin esa migracion, usarlas revienta en produccion aunque compile aca.
+
+    /** Se elimino una inscripcion de usuario del panel. */
+    ADMIN_USER_DELETE,
+
+    /** Se promovio o degrado a un usuario. */
+    ADMIN_USER_ROLE,
+
+    /** Alta, suspension o baja de una API key. */
+    ADMIN_API_KEY,
+
+    /** Cambio de cuota de almacenamiento de un proyecto. */
+    ADMIN_QUOTA,
+
+    /** Creacion o borrado de una copia de seguridad. */
+    ADMIN_BACKUP
 }
